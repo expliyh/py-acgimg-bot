@@ -1,0 +1,18 @@
+from sqlalchemy import Column, Integer, String, Boolean, Enum, JSON
+
+from defines import GroupChatMode
+
+from .base import ModelBase
+
+
+class Group(ModelBase):
+    __tablename__ = 'groups'
+    id = Column(Integer, primary_key=True, comment='群组的 ID')
+    enable = Column(Boolean, default=True, nullable=False, comment='是否启用此群组')
+    name = Column(String(64), nullable=True, comment='群组的名称')
+    enable_chat = Column(Boolean, default=False, nullable=False, comment='是否启用 AI 聊天')
+    chat_mode = Column(Enum(GroupChatMode), default=GroupChatMode.MIXED, nullable=False, comment='群组的聊天模式')
+    sanity_limit = Column(Integer, default=5, nullable=False, comment='群组允许的最大过滤等级 +1，该值为 7 则允许 R18')
+    allow_r18g = Column(Boolean, default=False, nullable=False, comment='是否允许 R18G')
+    allow_setu = Column(Boolean, default=True, nullable=False, comment='是否允许涩图')
+    admin_ids: list = Column(JSON, default=[], nullable=False, comment='群组管理员的 ID')
