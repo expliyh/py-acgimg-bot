@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "py-acgimg-bot"
+version = "0.1.0"
+description = ""
+authors = ["Expliyh <expliyh@outlook.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.109.0"
+uvicorn = "^0.26.0"
+python-telegram-bot = {extras = ["all"], version = "^20.7"}
+
+
+[[tool.poetry.source]]
+name = "mirrors"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
+priority = "default"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
