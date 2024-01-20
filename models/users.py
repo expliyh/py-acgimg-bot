@@ -1,12 +1,13 @@
 from sqlalchemy import Column, Integer, String, Boolean, Enum
 
 from defines import UserStatus
+from configs import config as file_config
 
-from .base import ModelBase
+from .base import Base
 
 
-class User(ModelBase):
-    __tablename__ = 'users'
+class User(Base):
+    __tablename__ = f"{file_config.db_prefix}users"
     id = Column(Integer, primary_key=True, comment='用户的 UID，与 Telegram 的 UID 一致')
     nick_name = Column(String(64), nullable=True, comment='用户自定义的昵称，未设置则为空')
     enable_chat = Column(Boolean, default=False, nullable=False, comment='是否启用 AI 聊天')

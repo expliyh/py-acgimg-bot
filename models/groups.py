@@ -1,12 +1,13 @@
 from sqlalchemy import Column, Integer, String, Boolean, Enum, JSON
 
 from defines import GroupChatMode
+from configs import config as file_config
 
-from .base import ModelBase
+from .base import Base
 
 
-class Group(ModelBase):
-    __tablename__ = 'groups'
+class Group(Base):
+    __tablename__ = f"{file_config.db_prefix}groups"
     id = Column(Integer, primary_key=True, comment='群组的 ID')
     enable = Column(Boolean, default=True, nullable=False, comment='是否启用此群组')
     name = Column(String(64), nullable=True, comment='群组的名称')

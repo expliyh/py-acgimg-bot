@@ -1,10 +1,12 @@
 from sqlalchemy import Column, Integer, String, Boolean, Enum, JSON, Text
 
-from .base import ModelBase
+from configs import config as file_config
+
+from .base import Base
 
 
-class Illustration(ModelBase):
-    __tablename__ = 'illustrations'
+class Illustration(Base):
+    __tablename__ = f"{file_config.db_prefix}illustrations"
     id = Column(String(20), primary_key=True, comment='插画的 PixivID')
     title = Column(String(64), nullable=True, comment='插画的标题')
     author_id = Column(String(20), nullable=False, comment='插画的作者 ID')
