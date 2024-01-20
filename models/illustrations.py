@@ -20,3 +20,4 @@ class Illustration(Base):
     is_ai = Column(Boolean, default=False, nullable=False, comment='是否为 AI 插画')
     file_urls: list = Column(JSON, default=[], nullable=False, comment='插画的文件链接')
     origin_urls: list = Column(JSON, default=[], nullable=False, comment='插画的原始链接')
+    file_ext: str = Column(String(8), nullable=False, comment='插画的文件后缀')
