@@ -7,9 +7,9 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.12"
-fastapi = "^0.109.0"
-uvicorn = "^0.26.0"
-python-telegram-bot = {extras = ["all"], version = "^20.7"}
+fastapi = "^0.110.0"
+uvicorn = "^0.27.1"
+python-telegram-bot = {extras = ["all"], version = "^21.0.1"}
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.25"}
 asyncmy = "^0.2.9"
 mariadb = "^1.1.9"
