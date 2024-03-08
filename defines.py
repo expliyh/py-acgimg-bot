@@ -69,6 +69,15 @@ class UserStatus(Enum):
     BLOCKED = "Blocked"
 
 
+class GroupStatus(Enum):
+    """
+    群组状态
+    """
+    ENABLED = "Enabled"
+    DISABLED = "Disabled"
+    BLOCKED = "Blocked"
+
+
 class GroupChatMode(Enum):
     """
     群组聊天记录的保存方法

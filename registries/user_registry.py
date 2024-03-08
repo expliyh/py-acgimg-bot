@@ -22,7 +22,7 @@ async def get_user_by_id(user_id: int) -> User:
         if result is None:
             new_user = User(id=user_id)
             await add_user(new_user)
-            return new_user
+            return await get_user_by_id(user_id)
         return user
 
 
