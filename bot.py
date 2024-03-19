@@ -32,6 +32,8 @@ class TelegramBot:
         await self.tg_bot.set_webhook(f"https://{config.external_url}/tapi/")
         self.tg_app = Application.builder().token(token.token).build()
         self.tg_app.add_handler(CommandHandler("start", start))
+        await self.tg_app.initialize()
+        await self.tg_app.start()
 
     async def put_update(self, request: Request) -> None:
         update = Update.de_json(await request.json(), self.tg_bot)
