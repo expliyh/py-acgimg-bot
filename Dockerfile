@@ -1,4 +1,4 @@
-FROM python:3.12-bookworm
+FROM python:3.12
 LABEL authors="Expliyh"
 RUN export POETRY_HOME=/opt/poetry && curl -sSL https://install.python-poetry.org | python3 -
 ADD . /workdir
@@ -17,4 +17,4 @@ ENV DATABASE_PREFIX=""
 ENV TZ=Asia/Shanghai
 RUN mkdir /images
 VOLUME /images
-ENTRYPOINT ["python3", "main.py"]
+ENTRYPOINT ["/opt/poetry/bin/poetry", "run", "main.py"]
