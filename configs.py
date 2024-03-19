@@ -14,6 +14,7 @@ class __Config:
         self.db_password = os.getenv('DATABASE_PASSWORD')
         self.db_name = os.getenv('DATABASE_NAME')
         self.db_prefix = os.getenv('DATABASE_PREFIX')
+        self.external_url = os.getenv('EXTERNAL_URL')
 
 
 config = __Config()
