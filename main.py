@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import FastAPI, Request
@@ -9,8 +10,6 @@ from contextlib import asynccontextmanager
 from registries import engine, config_registry
 
 from configs import config
-
-tg_ready = False
 
 # Enable logging
 logging.basicConfig(
@@ -29,9 +28,21 @@ async def start(update: Update, context) -> None:
 
 # TELEGRAM_TOKEN = 'AAAA'
 
-bot: Bot | None = None
+pool = asyncio.get_event_loop()
 
-tg_app: Application | None = None
+pool.run_until_complete(engine.create_all())
+tokens = pool.run_until_complete(config_registry.get_bot_tokens())
+if len(tokens) > 1:
+    raise Exception("Too many bot tokens, Multiple bot tokens are currently not supported")
+if len(tokens) == 0:
+    raise Exception("No bot token found")
+token = tokens[0]
+bot = Bot(token.token)
+pool.run_until_complete(bot.set_webhook(f"https://{config.external_url}/tapi/"))
+tg_app = Application.builder().token(token.token).build()
+tg_app.add_handler(CommandHandler("start", start))
+tg_ready = True
+logger.warning("Bot started")
 
 
 # tg_app.add_handler(CommandHandler("start", start))
@@ -39,22 +50,6 @@ tg_app: Application | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await engine.create_all()
-    global tg_ready
-    tokens = await config_registry.get_bot_tokens()
-    if len(tokens) > 1:
-        raise Exception("Too many bot tokens, Multiple bot tokens are currently not supported")
-    if len(tokens) == 0:
-        raise Exception("No bot token found")
-    token = tokens[0]
-    global bot
-    bot = Bot(token.token)
-    await bot.set_webhook(f"https://{config.external_url}/tapi/")
-    global tg_app
-    tg_app = Application.builder().token(token.token).build()
-    tg_app.add_handler(CommandHandler("start", start))
-    tg_ready = True
-    logger.warning("Bot started")
     yield
     pass
 
