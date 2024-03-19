@@ -3,7 +3,7 @@ LABEL authors="Expliyh"
 RUN export POETRY_HOME=/opt/poetry && curl -sSL https://install.python-poetry.org | python3 -
 ADD . /workdir
 WORKDIR /workdir
-RUN POETRY_HOME/bin/poetry install
+RUN $POETRY_HOME/bin/poetry install
 ENV DATABASE_HOST=mariadb
 ENV DATABASE_PORT=3306
 ENV DATABASE_NAME=your_database_name
