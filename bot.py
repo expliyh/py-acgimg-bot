@@ -35,7 +35,7 @@ class TelegramBot:
 
     async def put_update(self, request: Request) -> None:
         update = Update.de_json(await request.json(), self.tg_bot)
-        self.tg_app.update_queue.put(update)
+        await self.tg_app.update_queue.put(update)
 
 
 tg_bot = TelegramBot()
