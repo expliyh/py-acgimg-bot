@@ -29,6 +29,7 @@ class TelegramBot:
             raise Exception("No bot token found")
         token = tokens[0]
         self.tg_bot = Bot(token.token)
+        await self.tg_bot.initialize()
         await self.tg_bot.set_webhook(f"https://{config.external_url}/tapi/")
         self.tg_app = Application.builder().token(token.token).build()
         self.tg_app.add_handler(CommandHandler("start", start))
