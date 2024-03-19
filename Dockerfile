@@ -1,6 +1,6 @@
 FROM python:3.12-bookworm
 LABEL authors="Expliyh"
-RUN export POETRY_HOME=/opt/poetry && python3 install-poetry.py --version 1.2.0
+RUN export POETRY_HOME=/opt/poetry && curl -sSL https://install.python-poetry.org | python3 -
 ADD . /workdir
 WORKDIR /workdir
 RUN POETRY_HOME/bin/poetry install
