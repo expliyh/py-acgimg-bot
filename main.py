@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def start(update: Update, context) -> None:
+    logger.info(f"Update START for user: {update.effective_user}")
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello!")
 
 
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
     tg_app = Application.builder().token(token.token).build()
     tg_app.add_handler(CommandHandler("start", start))
     tg_ready = True
+    logger.warning("Bot started")
     yield
     pass
 
@@ -62,6 +64,10 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 async def root():
+    if not tg_ready:
+        logger.warning("BOT NOT READY")
+        logger.warning(tg_app)
+        return
     return {"message": "Hello World"}
 
 
@@ -73,6 +79,8 @@ async def say_hello(name: str):
 @app.post("/tapi/")
 async def telegram_webhook(request: Request):
     if not tg_ready:
+        logger.warning("BOT NOT READY")
+        logger.warning(tg_app)
         return
 
     update = Update.de_json(await request.json(), bot)
