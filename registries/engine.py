@@ -1,21 +1,10 @@
 from singleton_class_decorator import singleton
 from sqlalchemy import select, update, create_engine, func, delete
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncAttrs, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncAttrs, async_sessionmaker, AsyncSession, AsyncConnection
 from sqlalchemy.dialects.mysql import insert
 
 from configs import config as config_file
-
-
-def get_none_async_engine():
-    url = (f"mariadb+mariadb://{config_file.db_username}:"
-           f"{config_file.db_password}@{config_file.db_host}:{config_file.db_port}/"
-           f"{config_file.db_name}?charset=utf8mb4")
-    none_async_engine = create_engine(
-        url,
-        echo=True,
-        echo_pool=True
-    )
-    return none_async_engine
+from models import Base
 
 
 @singleton
@@ -34,9 +23,16 @@ class Engine:
             pool_recycle=3600
         )
 
-    def new_session(self):
+    def new_session(self) -> AsyncSession:
         async_session = async_sessionmaker(self.engine)
-        return async_session
+        return async_session()
+
+    async def create_all(self):
+        if self.engine is None:
+            self.create()
+        async with self.engine.begin() as conn:
+            conn: AsyncConnection = conn
+            await conn.run_sync(Base.metadata.create_all)
 
     def new_session_no_expire_on_commit(self):
         async_session = async_sessionmaker(self.engine, expire_on_commit=False)
@@ -44,9 +40,3 @@ class Engine:
 
 
 engine = Engine()
-
-
-def create_tables():
-    non_async_engine = get_none_async_engine()
-    from models import Base
-    Base.metadata.create_all(non_async_engine)

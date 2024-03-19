@@ -5,7 +5,10 @@ from fastapi import FastAPI, Request
 from telegram import Update, Bot
 from telegram.ext import Application, CallbackContext, CommandHandler
 
-app = FastAPI()
+from contextlib import asynccontextmanager
+from registries import engine, config_registry
+
+from configs import config
 
 tg_ready = False
 
@@ -33,10 +36,9 @@ tg_app: Application | None = None
 # tg_app.add_handler(CommandHandler("start", start))
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    from registries import create_tables, config_registry
-    create_tables()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await engine.create_all()
     global tg_ready
     tokens = await config_registry.get_bot_tokens()
     if len(tokens) > 1:
@@ -46,10 +48,16 @@ async def startup() -> None:
     token = tokens[0]
     global bot
     bot = Bot(token.token)
+    await bot.set_webhook(f"https://{config.external_url}/tapi/")
     global tg_app
     tg_app = Application.builder().token(token.token).build()
     tg_app.add_handler(CommandHandler("start", start))
     tg_ready = True
+    yield
+    pass
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/")
