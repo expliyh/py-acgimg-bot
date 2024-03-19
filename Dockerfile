@@ -14,4 +14,4 @@ ENV DATABASE_PREFIX=""
 ENV TZ=Asia/Shanghai
 RUN mkdir /images
 VOLUME /images
-ENTRYPOINT ["/opt/poetry/bin/poetry", "run", "uvicorn", "main:app"]
+ENTRYPOINT ["/opt/poetry/bin/poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0"]
