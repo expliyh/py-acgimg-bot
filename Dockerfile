@@ -10,12 +10,8 @@ ENV DATABASE_PORT=3306
 ENV DATABASE_NAME=your_database_name
 ENV DATABASE_USERNAME=your_username
 ENV DATABASE_PASSWORD=your_password
-ENV PIXIV_API_URL=""
-ENV PIXIV_TOKEN=""
-ENV TELEGRAM_BOT_TOKEN=your_telegram_token
-ENV DEVELOPER_CHAT_ID=""
 ENV DATABASE_PREFIX=""
 ENV TZ=Asia/Shanghai
 RUN mkdir /images
 VOLUME /images
-ENTRYPOINT ["/opt/poetry/bin/poetry", "run", "main.py"]
+ENTRYPOINT ["/opt/poetry/bin/poetry", "run", "python3", "run", "main.py"]
