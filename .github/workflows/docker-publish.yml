@@ -6,16 +6,14 @@ name: Docker
 # documentation.
 
 on:
-  workflow_dispatch:
-
-  #  schedule:
-  #    - cron: '38 14 * * *'
+  schedule:
+    - cron: '24 0 * * *'
   push:
-    branches: [ "main" , "latest" ]
+    branches: [ "main", "latest" ]
     # Publish semver tags as releases.
     tags: [ '*.*.*' ]
   pull_request:
-    branches: [ "main" , "latest" ]
+    branches: [ "main", "latest" ]
 
 env:
   # Use docker.io for Docker Hub if empty
@@ -26,6 +24,7 @@ env:
 
 jobs:
   build:
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
