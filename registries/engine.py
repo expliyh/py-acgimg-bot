@@ -24,7 +24,7 @@ class Engine:
         )
 
     def new_session(self) -> AsyncSession:
-        async_session = async_sessionmaker(self.engine, expire_on_commit=False)
+        async_session = async_sessionmaker(self.engine, expire_on_commit=True)
         return async_session()
 
     async def create_all(self):
