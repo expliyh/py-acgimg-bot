@@ -30,7 +30,6 @@ class Illustration(Base):
             return \
                 f"**{self.title}**\n" \
                 f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n" \
-                f"Tags: {', '.join(self.tags)}\n" \
                 f"描述: {self.caption}\n" \
                 f"[原图]({self.origin_urls[0]})" \
                 f"AI: {'是' if self.is_ai else '否'}\n"
@@ -39,7 +38,6 @@ class Illustration(Base):
             return \
                 f"**{self.title}**\n" \
                 f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n" \
-                f"Tags: {', '.join(self.tags)}\n" \
                 f"描述: {self.caption}\n" \
                 f"原图: {', '.join([f'[{i + 1}]({self.origin_urls[i]})' for i in range(self.page_count)])}" \
                 f"AI: {'是' if self.is_ai else '否'}\n"
