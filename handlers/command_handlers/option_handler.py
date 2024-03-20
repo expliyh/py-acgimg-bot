@@ -1,6 +1,6 @@
 import asyncio
 
-from telegram import Update, Message
+from telegram import Update, Message, InlineKeyboardMarkup
 from telegram.ext import CommandHandler
 
 import messase_generator
@@ -39,7 +39,7 @@ async def option_handler_func(update: Update, context) -> None:
     message: Message = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=config.text,
-        reply_markup=config.keyboard
+        reply_markup=InlineKeyboardMarkup(config.keyboard)
     )
     return
 
