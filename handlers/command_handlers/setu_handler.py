@@ -1,4 +1,5 @@
 from telegram import Update
+from telegram.ext import CommandHandler
 
 from defines import UserStatus, GroupStatus
 from exps import UserBlockedError, GroupBlockedError
@@ -20,3 +21,6 @@ async def setu(update: Update, context) -> None:
         group = await group_registry.get_group_by_id(chat_id)
         if group.status == GroupStatus.BLOCKED:
             raise GroupBlockedError("本群组已被禁止使用本Bot")
+
+
+setu_handler = CommandHandler("setu", setu)

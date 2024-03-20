@@ -6,6 +6,7 @@ from telegram import Update, Bot
 from telegram.ext import Application, CallbackContext, CommandHandler
 
 from configs import config
+from handlers import all_handlers
 from registries import config_registry
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,10 @@ class TelegramBot:
         token = tokens[0]
         self.tg_bot = Bot(token.token)
         await self.tg_bot.initialize()
-        await self.tg_bot.set_webhook(f"https://{config.external_url}/tapi/")
         self.tg_app = Application.builder().token(token.token).build()
         self.tg_app.add_handler(CommandHandler("start", start))
+        self.tg_app.add_handlers(all_handlers)
+        await self.tg_bot.set_webhook(f"https://{config.external_url}/tapi/")
         await self.tg_app.initialize()
         await self.tg_app.start()
 
