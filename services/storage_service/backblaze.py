@@ -46,3 +46,6 @@ class BackBlaze(Storage):
         self.b2_api.authorize_account("production", self.app_id, self.app_key)
         self.bucket = self.b2_api.get_bucket_by_name(self.bucket_name)
         return
+
+
+backblaze = BackBlaze()
