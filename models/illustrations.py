@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import Column, Integer, String, Boolean, Enum, JSON, Text
 
 from configs import config as file_config
@@ -21,4 +23,50 @@ class Illustration(Base):
     file_urls: list = Column(JSON, default=[], nullable=False, comment='插画的文件链接')
     telegram_file_ids: [int] = Column(JSON, default=[], nullable=False, comment='插画的文件链接')
     origin_urls: list = Column(JSON, default=[], nullable=False, comment='插画的原始链接')
-    file_ext: str = Column(String(8), nullable=False, comment='插画的文件后缀')
+    file_ext: [str] = Column(JSON, default=[], nullable=False, comment='插画的文件后缀')
+
+    def get_markdown(self) -> str:
+        if self.page_count == 1:
+            return \
+                f"**{self.title}**\n" \
+                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n" \
+                f"Tags: {', '.join(self.tags)}\n" \
+                f"描述: {self.caption}\n" \
+                f"[原图]({self.origin_urls[0]})" \
+                f"AI: {'是' if self.is_ai else '否'}\n"
+
+        else:
+            return \
+                f"**{self.title}**\n" \
+                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n" \
+                f"Tags: {', '.join(self.tags)}\n" \
+                f"描述: {self.caption}\n" \
+                f"原图: {', '.join([f'[{i + 1}]({self.origin_urls[i]})' for i in range(self.page_count)])}" \
+                f"AI: {'是' if self.is_ai else '否'}\n"
+
+
+def build_illust_from_api_dict(api_dict: dict) -> Illustration:
+    illust = Illustration(
+        id=str(api_dict['pixiv_id']),
+        title=api_dict['title'],
+        author_id=str(api_dict['author_id']),
+        author_name=api_dict['author_name'],
+        page_count=api_dict['page_count'],
+        sanity_level=int(api_dict['sanity_level']),
+        r18g=int(api_dict['x_restrict']) >= 2,
+        x_restrict=api_dict['x_restrict'],
+        tags=api_dict['tags'],
+        caption=api_dict['caption'],
+        is_ai=int(api_dict['illust_ai_type']) == 2,
+        file_urls=[],
+        origin_urls=[],
+        file_ext=[]
+    )
+    if illust.page_count == 1:
+        illust.origin_urls = [api_dict['meta_single_page']['original_image_url']]
+        illust.file_ext = os.path.splitext(api_dict['meta_single_page']['original_image_url'])[1]
+    else:
+        for i in range(illust.page_count):
+            illust.origin_urls.append(api_dict['meta_pages'][i]['image_urls']['original'])
+            illust.file_ext = os.path.splitext(api_dict['meta_pages'][i]['image_urls']['original'])[1]
+    return illust

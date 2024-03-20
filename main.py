@@ -13,6 +13,7 @@ from registries import engine, config_registry
 import uvicorn
 
 from configs import config
+from services import pixiv
 
 # Enable logging
 logging.basicConfig(
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await engine.create_all()
     await tg_bot.config()
+    await pixiv.read_token_from_config()
+    pixiv.token_refresh()
     logger.warning("Bot started")
     yield
     pass
