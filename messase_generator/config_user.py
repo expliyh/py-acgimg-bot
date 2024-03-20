@@ -16,11 +16,10 @@ class ConfigUser:
         self.keyboard = keyboard
 
 
-async def config_user(uid: int = None, page: int = 1, user: User = None) -> ConfigUser:
+async def config_user(page: int = 1, user: User = None) -> ConfigUser:
     """
     生成用户配置页面
-    :param user: 可选, 用户对象， 与 UID 至少指定一个，同时指定时优先使用 user
-    :param uid: 可选, 用户 ID, 与 user 至少指定一个，同时指定时优先使用 user
+    :param user: 用户对象， 与 UID 至少指定一个，同时指定时优先使用 user
     :param page: 可选, 当前页码，默认首页
     :return: 用户配置页面
     """
@@ -28,11 +27,9 @@ async def config_user(uid: int = None, page: int = 1, user: User = None) -> Conf
     option_per_page = 5
     offset = (page - 1) * option_per_page
     # 当 user 和 uid 同时为空时抛出异常
-    if user is None and uid is None:
-        raise ValueError('uid 和 user 不能同时为空')
-    # 当 user 为空时从数据库获取用户对象
     if user is None:
-        user = await user_registry.get_user_by_id(uid)
+        raise ValueError('user 不能为空')
+    # 当 user 为空时从数据库获取用户对象
     config: [(str, str)] = [
         ('昵称', user.nick_name),
         ('启用 AI 聊天', '是' if user.enable_chat else '否'),

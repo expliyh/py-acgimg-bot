@@ -14,14 +14,16 @@ async def add_user(user: User) -> None:
         await session.commit()
 
 
-async def get_user_by_id(user_id: int, session: AsyncSession) -> User:
-    result = await session.execute(select(User).where(User.id == user_id))
-    if result.scalar() is None:
-        new_user = User(id=user_id)
-        await add_user(new_user)
-        return await get_user_by_id(user_id, session)
-    user = result.scalar().first()
-    return user
+async def get_user_by_id(user_id: int) -> User:
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalar()
+        if user is None:
+            new_user = User(id=user_id)
+            await add_user(new_user)
+            return await get_user_by_id(user_id)
+        return user
 
 
 async def set_sanity_limit(user_id: int, sanity_limit: int) -> None:

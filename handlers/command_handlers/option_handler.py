@@ -16,26 +16,26 @@ async def option_handler_func(update: Update, context) -> None:
     :return: None
     """
     is_group = is_group_type(update.effective_chat.type)
-    async with engine.new_session() as session:
-        user = await user_registry.get_user_by_id(update.effective_user.id, session)
-        if is_group:
-            group = await group_registry.get_group_by_id(update.effective_chat.id, session)
-            if user not in group.admin_ids:
-                # 回复命令提示没有权限并定时删除回复和命令
-                message: Message = await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text="您没有权限使用此命令 (该提示和命令将在 10 秒后自动删除)",
-                    reply_to_message_id=update.effective_message.id
-                )
-                await asyncio.create_task(delete_messages(
-                    chat_id=update.effective_chat.id,
-                    message_ids=[update.effective_message.id, message.message_id],
-                    context=context,
-                    delay=10
-                ))
-                return
+    user = await user_registry.get_user_by_id(update.effective_user.id)
+    if is_group:
+        group = await group_registry.get_group_by_id(update.effective_chat.id)
+        if user not in group.admin_ids:
+            # 回复命令提示没有权限并定时删除回复和命令
+            message: Message = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="您没有权限使用此命令 (该提示和命令将在 10 秒后自动删除)",
+                reply_to_message_id=update.effective_message.id
+            )
+            await asyncio.create_task(delete_messages(
+                chat_id=update.effective_chat.id,
+                message_ids=[update.effective_message.id, message.message_id],
+                context=context,
+                delay=10
+            ))
             return
-        config = await messase_generator.config_user(page=1, user=user)
+        return
+    config = await messase_generator.config_user(page=1, user=user)
+
     message: Message = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=config.text,
