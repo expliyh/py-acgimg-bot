@@ -1,6 +1,6 @@
 import asyncio
 
-from telegram import Update, Message
+from telegram import Update, Message, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, ContextTypes
 from telegram.constants import ParseMode
 
@@ -36,7 +36,7 @@ async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE)
     message: Message = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=config.text,
-        reply_markup=config.keyboard,
+        reply_markup=InlineKeyboardMarkup(config.keyboard),
         parse_mode=ParseMode.MARKDOWN_V2
     )
     return

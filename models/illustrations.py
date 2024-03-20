@@ -29,19 +29,19 @@ class Illustration(Base):
     def get_markdown(self) -> str:
         if self.page_count == 1:
             return \
-                f"**{self.title}**\n" \
-                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n" \
-                f"描述: {self.caption}\n" \
-                f"[原图]({self.origin_urls[0]})" \
-                f"AI: {'是' if self.is_ai else '否'}\n"
+                f"**{self.title}**\n\n" \
+                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n\n" \
+                f"描述: {self.caption}\n\n" \
+                f"[原图]({self.origin_urls[0]})\n\n" \
+                f"AI: {'是' if self.is_ai else '否'}"
 
         else:
             return \
-                f"**{self.title}**\n" \
-                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n" \
-                f"描述: {self.caption}\n" \
-                f"原图: {', '.join([f'[{i + 1}]({self.origin_urls[i]})' for i in range(self.page_count)])}" \
-                f"AI: {'是' if self.is_ai else '否'}\n"
+                f"**{self.title}**\n\n" \
+                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n\n" \
+                f"描述: {self.caption}\n\n" \
+                f"原图: {', '.join([f'[{i + 1}]({self.origin_urls[i]})' for i in range(self.page_count)])}\n\n" \
+                f"AI: {'是' if self.is_ai else '否'}"
 
 
 def build_illust_from_api_dict(api_dict: dict) -> Illustration:

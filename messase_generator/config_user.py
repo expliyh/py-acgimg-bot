@@ -54,4 +54,4 @@ async def config_user(page: int = 1, user: User = None) -> ConfigUser:
     if offset + option_per_page < len(all_keyboard):
         keyboard.append([InlineKeyboardButton('下一页', callback_data=f'conf:page:goto:{page + 1}')])
     text = f'用户配置 ({page}/{len(all_keyboard) // option_per_page + 1})\n\n'
-    return ConfigUser(text, [keyboard])
+    return ConfigUser(text, keyboard)
