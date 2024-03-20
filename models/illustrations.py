@@ -47,10 +47,10 @@ class Illustration(Base):
 
 def build_illust_from_api_dict(api_dict: dict) -> Illustration:
     illust = Illustration(
-        id=str(api_dict['pixiv_id']),
+        id=str(api_dict['id']),
         title=api_dict['title'],
-        author_id=str(api_dict['author_id']),
-        author_name=api_dict['author_name'],
+        author_id=str(api_dict['user']['id']),
+        author_name=api_dict['user']['name'],
         page_count=api_dict['page_count'],
         sanity_level=int(api_dict['sanity_level']),
         r18g=int(api_dict['x_restrict']) >= 2,

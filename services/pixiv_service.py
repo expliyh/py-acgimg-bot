@@ -42,7 +42,7 @@ class PixivService:
 
     async def get_illust_info_by_pixiv_id(self, pixiv_id: int) -> Illustration:
         self.token_refresh()
-        illust_info_dict: dict = self.api.illust_detail(pixiv_id)
+        illust_info_dict: dict = self.api.illust_detail(pixiv_id)['illust']
         illust = build_illust_from_api_dict(illust_info_dict)
         return illust
 
