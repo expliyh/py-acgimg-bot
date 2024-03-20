@@ -26,6 +26,7 @@ pixivpy3 = "^3.7.5"
 #name = "mirrors"
 #url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
 #priority = "primary"
+b2sdk = "^1.33.0"
 
 [build-system]
 requires = ["poetry-core"]

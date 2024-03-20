@@ -21,7 +21,8 @@ class Illustration(Base):
     caption = Column(Text, nullable=True, comment='插画的描述')
     is_ai = Column(Boolean, default=False, nullable=False, comment='是否为 AI 插画')
     file_urls: list = Column(JSON, default=[], nullable=False, comment='插画的文件链接')
-    telegram_file_ids: [int] = Column(JSON, default=[], nullable=False, comment='插画的文件链接')
+    compressed_file_ids: [str | None] = Column(JSON, default=[], nullable=False, comment='插画的压缩文件 ID')
+    original_file_ids: [str | None] = Column(JSON, default=[], nullable=False, comment='插画的原始文件 ID')
     origin_urls: list = Column(JSON, default=[], nullable=False, comment='插画的原始链接')
     file_ext: [str] = Column(JSON, default=[], nullable=False, comment='插画的文件后缀')
 
@@ -57,6 +58,8 @@ def build_illust_from_api_dict(api_dict: dict) -> Illustration:
         caption=api_dict['caption'],
         is_ai=int(api_dict['illust_ai_type']) == 2,
         file_urls=[],
+        compressed_file_ids=[],
+        original_file_ids=[],
         origin_urls=[],
         file_ext=[]
     )
