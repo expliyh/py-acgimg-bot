@@ -18,11 +18,11 @@ async def get_user_by_id(user_id: int) -> User:
     async with engine.new_session() as session:
         session: AsyncSession = session
         result = await session.execute(select(User).where(User.id == user_id))
-        user = result.scalar().first()
-        if result is None:
+        if result.scalar() is None:
             new_user = User(id=user_id)
             await add_user(new_user)
             return await get_user_by_id(user_id)
+        user = result.scalar().first()
         return user
 
 
