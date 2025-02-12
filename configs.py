@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 
 __env_path = '.env'
 
+db_config_declare = {
+    'allow_r18g':False,
+    'enable_on_new_group':False,
+    'super_user': '1285315854'
+}
 
 class __Config:
     def __init__(self):

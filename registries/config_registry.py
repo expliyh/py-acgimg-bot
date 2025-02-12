@@ -170,3 +170,22 @@ async def get_backblaze_config() -> BackBlazeConfig:
         base_path=await get_config("backblaze_base_path"),
         base_url=await get_config("backblaze_base_url")
     )
+
+
+async def init_database_config(db_config_declare: dict) -> None:
+    """
+    初始化数据库配置，根据提供的声明，添加缺失的配置项。
+    :param db_config_declare: 声明的配置项，键值对形式
+    """
+    for key, default in db_config_declare.items():
+        # 检查配置是否存在
+        existing_config = await get_config_detail(key)
+        if existing_config:
+            continue  # 配置已存在，跳过
+        # 创建新的配置项
+        config = Config(
+            key=key,
+            value_str=default if isinstance(default, str) else None,
+            value_bool=default if isinstance(default, bool) else None
+        )
+        await add_config(config, default)

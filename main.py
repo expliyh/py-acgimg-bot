@@ -12,7 +12,8 @@ from contextlib import asynccontextmanager
 from registries import engine, config_registry
 import uvicorn
 
-from configs import config
+from configs import config, db_config_declare
+from registries.config_registry import init_database_config
 from services import pixiv, storage_service
 from services.storage_service import backblaze
 
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 应用启动时的逻辑
     await engine.create_all()
     storage = await storage_service.use()
     if storage is None:
@@ -43,8 +45,18 @@ async def lifespan(app: FastAPI):
     await tg_bot.config()
     await pixiv.read_token_from_config()
     pixiv.token_refresh()
+
+    # 新增：初始化数据库配置
+    try:
+        await init_database_config(db_config_declare)
+        logger.info("Database configurations initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database configurations: {e}")
+
     logger.warning("Bot started")
     yield
+
+    # 应用关闭时的逻辑
     pass
 
 
