@@ -3,7 +3,7 @@ LABEL authors="Expliyh"
 #LABEL org.opencontainers.image.source = "https://github.com/expliyh/py-acgimg-bot"
 ADD . /workdir
 WORKDIR /workdir
-RUN pip install -r requiremrnts.txt
+RUN pip install -r requirements.txt
 ENV DATABASE_HOST=mariadb
 ENV DATABASE_PORT=3306
 ENV DATABASE_NAME=your_database_name
