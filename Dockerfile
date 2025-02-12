@@ -9,7 +9,7 @@ ENV DATABASE_PORT=3306
 ENV DATABASE_NAME=your_database_name
 ENV DATABASE_USERNAME=your_username
 ENV DATABASE_PASSWORD=your_password
-ENV DATABASE_PREFIX=""
+ENV DATABASE_PREFIX=acgimg
 ENV TZ=Asia/Shanghai
 RUN mkdir /images
 VOLUME /images
