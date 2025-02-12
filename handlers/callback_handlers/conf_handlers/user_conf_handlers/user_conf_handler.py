@@ -1,8 +1,10 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
-handler_map = {
+from .switch_r18g import switch_r18g
 
+handler_map = {
+    "r18g": switch_r18g
 }
 
 
@@ -11,4 +13,4 @@ async def user_conf_handler_func(update: Update, context: ContextTypes.DEFAULT_T
         chat_id=update.effective_chat.id,
         text="UserOptionCallback!"
     )
-    # return handler_map[cmd[0]](update, context, cmd[1:])
+    return await handler_map[cmd[0]](update, context, cmd[1:])

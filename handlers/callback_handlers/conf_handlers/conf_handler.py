@@ -9,4 +9,4 @@ handler_map = {
 
 
 async def callback_conf_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: list[str]):
-    return handler_map[cmd[0]](update, context, cmd[1:])
+    return await handler_map[cmd[0]](update, context, cmd[1:])
