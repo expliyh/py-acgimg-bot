@@ -8,7 +8,7 @@ async def use() -> Storage | None:
     config = await config_registry.get_config("storage_service_use")
     if config is None:
         return None
-    match config.value_str:
+    match config:
         case "backblaze":
             return backblaze
         case _:
