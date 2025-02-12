@@ -13,4 +13,4 @@ ENV DATABASE_PREFIX=""
 ENV TZ=Asia/Shanghai
 RUN mkdir /images
 VOLUME /images
-ENTRYPOINT ["python3", "run", "uvicorn", "main:app", "--host", "0.0.0.0"]
+ENTRYPOINT ["python3", "uvicorn", "main:app", "--host", "0.0.0.0"]
