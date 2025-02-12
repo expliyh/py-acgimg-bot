@@ -40,3 +40,6 @@ async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode=ParseMode.MARKDOWN_V2
     )
     return
+
+
+admin_handler = CommandHandler('admin', admin_handler_func)

@@ -95,9 +95,22 @@ async def add_config(config: Config, default: str | bool) -> None:
     """
     # 如果 value_str 或 value_bool 为 None，则使用默认值
     if config.value_str is None:
-        config.value_str = default if isinstance(default, str) else ""
+        config.value_str = default if isinstance(default, str) else None
     if config.value_bool is None:
-        config.value_bool = default if isinstance(default, bool) else False
+        config.value_bool = default if isinstance(default, bool) else None
+
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        # 合并操作，如果记录存在则更新，否则插入
+        await session.merge(config)
+        await session.commit()
+
+
+async def update_config(key: str, value: str | bool):
+    config = Config(key)
+
+    config.value_str = value if isinstance(value, str) else None
+    config.value_bool = value if isinstance(value, bool) else None
 
     async with engine.new_session() as session:
         session: AsyncSession = session

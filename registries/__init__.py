@@ -4,5 +4,6 @@ from . import (
     illust_registry,
     user_registry,
     group_registry,
-    config_registry
+    config_registry,
+    active_message_handler_registry
 )
