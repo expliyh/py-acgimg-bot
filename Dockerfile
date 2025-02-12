@@ -1,10 +1,9 @@
 FROM python:3.12
 LABEL authors="Expliyh"
 #LABEL org.opencontainers.image.source = "https://github.com/expliyh/py-acgimg-bot"
-RUN export POETRY_HOME=/opt/poetry && curl -sSL https://install.python-poetry.org | python3 -
 ADD . /workdir
 WORKDIR /workdir
-RUN /opt/poetry/bin/poetry install
+RUN pip install -r requiremrnts.txt
 ENV DATABASE_HOST=mariadb
 ENV DATABASE_PORT=3306
 ENV DATABASE_NAME=your_database_name
@@ -14,4 +13,4 @@ ENV DATABASE_PREFIX=""
 ENV TZ=Asia/Shanghai
 RUN mkdir /images
 VOLUME /images
-ENTRYPOINT ["/opt/poetry/bin/poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0"]
+ENTRYPOINT ["python3", "run", "uvicorn", "main:app", "--host", "0.0.0.0"]
