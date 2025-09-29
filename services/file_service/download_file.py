@@ -28,7 +28,7 @@ async def download_file(filename: str, url: str, replace: bool = False):
                         async with session.get(url) as response:
                             if response.status == 200:
                                 # 打开文件准备写入
-                                with aiofiles.open(file_url, 'wb') as f:
+                                async with aiofiles.open(file_url, 'wb') as f:
                                     await f.write(await response.content.read())
                                 return
                             else:
