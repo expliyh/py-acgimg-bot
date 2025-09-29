@@ -17,6 +17,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: .github/scripts/install-system-deps.sh
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
