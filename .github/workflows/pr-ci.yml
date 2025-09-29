@@ -17,6 +17,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install system dependencies
         run: .github/scripts/install-system-deps.sh
 
