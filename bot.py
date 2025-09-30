@@ -1,9 +1,10 @@
 import logging
+from typing import Literal
 
 from fastapi import Request
 
 from telegram import Update, Bot
-from telegram.ext import Application, CallbackContext, CommandHandler
+from telegram.ext import Application, CommandHandler
 
 from configs import config
 from handlers import all_handlers
@@ -21,6 +22,7 @@ class TelegramBot:
     def __init__(self):
         self.tg_bot: Bot | None = None
         self.tg_app: Application | None = None
+        self._mode: Literal["webhook", "polling"] | None = None
 
     async def config(self):
         tokens = await config_registry.get_bot_tokens()
@@ -28,19 +30,84 @@ class TelegramBot:
             raise Exception("Too many bot tokens, Multiple bot tokens are currently not supported")
         if len(tokens) == 0:
             raise Exception("No bot token found")
+
+        self._mode = None
+
         token = tokens[0]
         self.tg_bot = Bot(token.token)
         await self.tg_bot.initialize()
+
         self.tg_app = Application.builder().token(token.token).build()
         self.tg_app.add_handler(CommandHandler("start", start))
         self.tg_app.add_handlers(all_handlers)
-        await self.tg_bot.set_webhook(f"https://{config.external_url}/tapi/")
+
         await self.tg_app.initialize()
+
+        external_url = config.external_url.strip() if config.external_url else ""
+        if external_url:
+            await self._ensure_webhook_mode(external_url)
+        else:
+            logger.info("EXTERNAL_URL not provided; falling back to polling mode")
+            await self._ensure_polling_mode()
+
+    async def _ensure_webhook_mode(self, external_url: str) -> None:
+        if not self.tg_bot or not self.tg_app:
+            raise RuntimeError("Telegram bot is not initialized")
+
+        if self.tg_app.updater and self.tg_app.updater.running:
+            await self.tg_app.updater.stop()
+
+        webhook_url = self._build_webhook_url(external_url)
+        await self.tg_bot.set_webhook(webhook_url, drop_pending_updates=True)
+
+        if not self.tg_app.running:
+            await self.tg_app.start()
+
+        self._mode = "webhook"
+        logger.info("Telegram bot configured to use webhook mode: %s", webhook_url)
+
+    async def _ensure_polling_mode(self) -> None:
+        if not self.tg_bot or not self.tg_app:
+            raise RuntimeError("Telegram bot is not initialized")
+
+        if self.tg_app.running:
+            # stop() will also stop updater if running
+            await self.tg_app.stop()
+
+        if self.tg_app.updater and self.tg_app.updater.running:
+            await self.tg_app.updater.stop()
+
+        await self.tg_bot.delete_webhook(drop_pending_updates=True)
+
+        if not self.tg_app.updater:
+            raise RuntimeError("Telegram application has no updater for polling mode")
+
+        await self.tg_app.updater.start_polling(drop_pending_updates=True)
         await self.tg_app.start()
 
+        self._mode = "polling"
+        logger.info("Telegram bot configured to use polling mode")
+
+    @staticmethod
+    def _build_webhook_url(base_url: str) -> str:
+        normalized = base_url.strip()
+        if not normalized:
+            raise ValueError("EXTERNAL_URL is empty")
+        if normalized.endswith("/"):
+            normalized = normalized[:-1]
+        if not normalized.startswith("http://") and not normalized.startswith("https://"):
+            normalized = f"https://{normalized}"
+        return f"{normalized}/tapi/"
+
     async def put_update(self, request: Request) -> None:
+        if self._mode != "webhook":
+            logger.debug("Received webhook update while not in webhook mode; ignoring")
+            return
+
+        if not self.tg_bot or not self.tg_app:
+            raise RuntimeError("Telegram bot is not initialized")
+
         update = Update.de_json(await request.json(), self.tg_bot)
-        # await self.tg_app.update_queue.put(update)
         await self.tg_app.process_update(update)
 
 
