@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Literal
 
@@ -22,6 +23,7 @@ class TelegramBot:
     def __init__(self):
         self.tg_bot: Bot | None = None
         self.tg_app: Application | None = None
+        self.poll_task: asyncio.Task | None = None
         self._mode: Literal["webhook", "polling"] | None = None
 
     async def config(self):
@@ -54,8 +56,8 @@ class TelegramBot:
         if not self.tg_bot or not self.tg_app:
             raise RuntimeError("Telegram bot is not initialized")
 
-        if self.tg_app.updater and self.tg_app.updater.running:
-            await self.tg_app.updater.stop()
+        if self.tg_app.running:
+            await self.tg_app.stop()
 
         webhook_url = self._build_webhook_url(external_url)
         await self.tg_bot.set_webhook(webhook_url, drop_pending_updates=True)
@@ -66,6 +68,23 @@ class TelegramBot:
         self._mode = "webhook"
         logger.info("Telegram bot configured to use webhook mode: %s", webhook_url)
 
+    async def _custom_polling(self, interval: float = 2.0):
+        """
+        自定义轮询：每隔 interval 秒调用 get_updates
+        """
+        offset = 0
+        while True:
+            print("POLL")
+            try:
+                updates = await self.tg_bot.get_updates(offset=offset, timeout=10)
+                for update in updates:
+                    offset = update.update_id + 1
+                    # ✅ 关键：手动交给 PTB 处理
+                    await self.tg_app.process_update(update)
+            except Exception as e:
+                print(f"Polling error: {e}")
+            await asyncio.sleep(interval)
+
     async def _ensure_polling_mode(self) -> None:
         if not self.tg_bot or not self.tg_app:
             raise RuntimeError("Telegram bot is not initialized")
@@ -74,16 +93,9 @@ class TelegramBot:
             # stop() will also stop updater if running
             await self.tg_app.stop()
 
-        if self.tg_app.updater and self.tg_app.updater.running:
-            await self.tg_app.updater.stop()
-
         await self.tg_bot.delete_webhook(drop_pending_updates=True)
 
-        if not self.tg_app.updater:
-            raise RuntimeError("Telegram application has no updater for polling mode")
-
-        await self.tg_app.updater.start_polling(drop_pending_updates=True)
-        await self.tg_app.start()
+        self.poll_task = asyncio.create_task(self._custom_polling(interval=2.0))
 
         self._mode = "polling"
         logger.info("Telegram bot configured to use polling mode")
