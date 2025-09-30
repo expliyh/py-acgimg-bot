@@ -1,10 +1,12 @@
 from telegram import Update
-from telegram.ext import ContextTypes, CommandHandler
+from telegram.ext import ContextTypes
 
 from services import pixiv
 from services.command_history import command_logger
+from handlers.registry import bot_handler
 
 
+@bot_handler
 @command_logger("pinfo")
 async def p_info_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not pixiv.enabled:
@@ -21,5 +23,3 @@ async def p_info_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
     return
 
-
-p_info_handler = CommandHandler("pinfo", p_info_func)

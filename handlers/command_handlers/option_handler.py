@@ -1,14 +1,15 @@
 import asyncio
 
 from telegram import Update, Message, InlineKeyboardMarkup
-from telegram.ext import CommandHandler
 
 import messase_generator
 from utils import is_group_type, delete_messages
 from registries import user_registry, group_registry, engine
 from services.command_history import command_logger
+from handlers.registry import bot_handler
 
 
+@bot_handler
 @command_logger("option")
 async def option_handler_func(update: Update, context) -> None:
     """
@@ -45,5 +46,3 @@ async def option_handler_func(update: Update, context) -> None:
     )
     return
 
-
-option_handler = CommandHandler("option", option_handler_func)

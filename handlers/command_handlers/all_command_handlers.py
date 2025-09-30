@@ -1,11 +1,9 @@
-from .admin_handler import admin_handler
-from .option_handler import option_handler
-from .setu_handler import setu_handler
-from .p_info_handler import p_info_handler
+"""Aggregate all bot handlers registered via decorators."""
 
-all_command_handlers = [
-    option_handler,
-    setu_handler,
-    p_info_handler,
-    admin_handler
-]
+from handlers.registry import iter_bot_handlers
+
+# Import modules for side effects so their handlers register before aggregation.
+from . import admin_handler, option_handler, p_info_handler, setu_handler
+
+
+all_command_handlers = iter_bot_handlers()

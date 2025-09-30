@@ -54,6 +54,7 @@ def command_logger(command_name: str) -> Callable[[F], F]:
                 except Exception:  # pragma: no cover - 日志记录即可
                     logger.exception("Failed to record command history for %s", command_name)
 
+        wrapper.__command_name__ = command_name
         return wrapper  # type: ignore[return-value]
 
     return decorator
