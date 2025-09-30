@@ -1,204 +1,198 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Config
 from .engine import engine
 
 
+def _optional_str(value: str | bool | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return str(value)
+    text = str(value).strip()
+    return text or None
+
+
+@dataclass
 class Token:
     token: str
     enable: bool
 
-    def __init__(self, token: str, enable: bool):
-        """
-        初始化 Token 对象。
-        :param token: 用于验证的 API 令牌
-        :param enable: 令牌是否启用（布尔值）
-        """
-        self.token = token
-        self.enable = enable
 
-
+@dataclass
 class BackBlazeConfig:
-    app_id: str | None
-    app_key: str | None
-    bucket_name: str | None
-    base_path: str | None
-    base_url: str | None
+    app_id: str | None = None
+    app_key: str | None = None
+    bucket_name: str | None = None
+    base_path: str | None = None
+    base_url: str | None = None
 
-    def set_app_id(self, app_id: str):
-        """
-        设置 B2 应用 ID。
-        """
-        self.app_id = app_id
+    def __post_init__(self) -> None:
+        self.base_path = self._normalize_path(self.base_path)
+        self.base_url = self._normalize_url(self.base_url)
 
-    def set_app_key(self, app_key: str):
-        """
-        设置 B2 应用密钥。
-        """
-        self.app_key = app_key
+    @staticmethod
+    def _normalize_path(path: str | None) -> str | None:
+        cleaned = _optional_str(path)
+        if cleaned is None:
+            return None
+        return cleaned.replace("\\", "/").strip("/") or None
 
-    def set_bucket_name(self, bucket_name: str):
-        """
-        设置存储桶名称。
-        """
-        self.bucket_name = bucket_name
+    @staticmethod
+    def _normalize_url(url: str | None) -> str | None:
+        cleaned = _optional_str(url)
+        if cleaned is None:
+            return None
+        return cleaned.rstrip("/") or None
 
-    def set_base_path(self, base_path: str):
-        """
-        设置基础存储路径。
-        如果存在，确保路径以斜杠开头和结尾。
-        """
-        if base_path is None:
-            self.base_path = None
-            return
-        self.base_path = base_path
-        if not self.base_path.endswith("/"):
-            self.base_path += "/"
-        while self.base_path.startswith("/"):
-            self.base_path = self.base_path[1:]
 
-    def set_base_url(self, base_url: str):
-        """
-        设置基础 URL。
-        如果存在，确保 URL 不以斜杠结尾。
-        """
-        if base_url is None:
-            self.base_url = None
-            return
-        self.base_url = base_url
-        while self.base_url.endswith("/"):
-            self.base_url = self.base_url[:-1]
+@dataclass
+class WebDavConfig:
+    endpoint: str | None = None
+    username: str | None = None
+    password: str | None = None
+    base_path: str | None = None
+    public_base_url: str | None = None
 
-    def __init__(
-            self,
-            app_id: str = None,
-            app_key: str = None,
-            bucket_name: str = None,
-            base_path: str = None,
-            base_url: str = None
-    ):
-        """
-        初始化 BackBlaze 配置。
-        """
-        self.app_id = app_id
-        self.app_key = app_key
-        self.bucket_name = bucket_name
-        self.set_base_path(base_path)
-        self.set_base_url(base_url)
+    def __post_init__(self) -> None:
+        self.endpoint = _optional_str(self.endpoint)
+        self.username = _optional_str(self.username)
+        self.password = _optional_str(self.password)
+        self.base_path = self._normalize_path(self.base_path)
+        self.public_base_url = self._normalize_url(self.public_base_url)
+
+    @staticmethod
+    def _normalize_path(path: str | None) -> str | None:
+        cleaned = _optional_str(path)
+        if cleaned is None:
+            return None
+        return cleaned.replace("\\", "/").strip("/") or None
+
+    @staticmethod
+    def _normalize_url(url: str | None) -> str | None:
+        cleaned = _optional_str(url)
+        if cleaned is None:
+            return None
+        return cleaned.rstrip("/") or None
+
+
+@dataclass
+class LocalStorageConfig:
+    root_path: str | None = None
+    base_url: str | None = None
+
+    def __post_init__(self) -> None:
+        self.root_path = self._normalize_path(self.root_path)
+        self.base_url = self._normalize_url(self.base_url)
+
+    @staticmethod
+    def _normalize_path(path: str | None) -> str | None:
+        cleaned = _optional_str(path)
+        if cleaned is None:
+            return None
+        return cleaned.replace("\\", "/") or None
+
+    @staticmethod
+    def _normalize_url(url: str | None) -> str | None:
+        cleaned = _optional_str(url)
+        if cleaned is None:
+            return None
+        return cleaned.rstrip("/") or None
 
 
 async def add_config(config: Config, default: str | bool) -> None:
-    """
-    将配置添加到数据库中。
-    如果配置已存在，则更新其值。
-    """
-    # 如果 value_str 或 value_bool 为 None，则使用默认值
     if config.value_str is None:
         config.value_str = default if isinstance(default, str) else None
     if config.value_bool is None:
         config.value_bool = default if isinstance(default, bool) else None
 
     async with engine.new_session() as session:
-        session: AsyncSession = session
-        # 合并操作，如果记录存在则更新，否则插入
         await session.merge(config)
         await session.commit()
 
 
-async def update_config(key: str, value: str | bool):
+async def update_config(key: str, value: str | bool) -> None:
     config = Config(key)
-
     config.value_str = value if isinstance(value, str) else None
     config.value_bool = value if isinstance(value, bool) else None
 
     async with engine.new_session() as session:
-        session: AsyncSession = session
-        # 合并操作，如果记录存在则更新，否则插入
         await session.merge(config)
         await session.commit()
 
 
 async def get_configs(key: str) -> list[Config]:
-    """
-    根据 key 获取多个配置项。
-    """
     async with engine.new_session() as session:
-        session: AsyncSession = session
         result = await session.execute(select(Config).where(Config.key == key))
         return list(result.scalars())
 
 
 async def get_config_detail(key: str) -> Config | None:
-    """
-    根据 key 获取单个配置项的详细信息（Config 对象）。
-    """
     async with engine.new_session() as session:
-        session: AsyncSession = session
         result = await session.execute(select(Config).where(Config.key == key))
         return result.scalar_one_or_none()
 
 
 async def get_config(key: str) -> str | bool | None:
-    """
-    根据 key 获取配置项的值，自动返回 str 或 bool 类型。
-    """
     config = await get_config_detail(key)
     if config is None:
         return None
-    # 如果 value_str 不为 None，则返回字符串类型
     if config.value_str is not None:
         return config.value_str
-    # 否则返回布尔类型
-    elif config.value_bool is not None:
+    if config.value_bool is not None:
         return config.value_bool
-    else:
-        return None
+    return None
 
 
 async def get_bot_tokens() -> list[Token]:
-    """
-    获取所有机器人的 API 令牌。
-    """
     configs = await get_configs("bot_token")
-    return [Token(i.value_str, i.value_bool) for i in configs]
+    return [Token(token=i.value_str or "", enable=bool(i.value_bool)) for i in configs]
 
 
 async def get_pixiv_tokens() -> list[Token]:
-    """
-    获取所有 Pixiv 的 API 令牌。
-    """
     configs = await get_configs("pixiv_token")
-    return [Token(i.value_str, i.value_bool) for i in configs]
+    return [Token(token=i.value_str or "", enable=bool(i.value_bool)) for i in configs]
 
 
 async def get_backblaze_config() -> BackBlazeConfig:
-    """
-    获取 Backblaze 的完整配置。
-    """
     return BackBlazeConfig(
-        app_id=await get_config("backblaze_app_id"),
-        app_key=await get_config("backblaze_app_key"),
-        bucket_name=await get_config("backblaze_bucket_name"),
-        base_path=await get_config("backblaze_base_path"),
-        base_url=await get_config("backblaze_base_url")
+        app_id=_optional_str(await get_config("backblaze_app_id")),
+        app_key=_optional_str(await get_config("backblaze_app_key")),
+        bucket_name=_optional_str(await get_config("backblaze_bucket_name")),
+        base_path=_optional_str(await get_config("backblaze_base_path")),
+        base_url=_optional_str(await get_config("backblaze_base_url")),
     )
 
 
-async def init_database_config(db_config_declare: dict) -> None:
-    """
-    初始化数据库配置，根据提供的声明，添加缺失的配置项。
-    :param db_config_declare: 声明的配置项，键值对形式
-    """
+async def get_webdav_config() -> WebDavConfig:
+    return WebDavConfig(
+        endpoint=_optional_str(await get_config("webdav_endpoint")),
+        username=_optional_str(await get_config("webdav_username")),
+        password=_optional_str(await get_config("webdav_password")),
+        base_path=_optional_str(await get_config("webdav_base_path")),
+        public_base_url=_optional_str(await get_config("webdav_public_url")),
+    )
+
+
+async def get_local_storage_config() -> LocalStorageConfig:
+    return LocalStorageConfig(
+        root_path=_optional_str(await get_config("local_storage_root")),
+        base_url=_optional_str(await get_config("local_storage_base_url")),
+    )
+
+
+async def init_database_config(db_config_declare: dict[str, str | bool]) -> None:
     for key, default in db_config_declare.items():
-        # 检查配置是否存在
         existing_config = await get_config_detail(key)
         if existing_config:
-            continue  # 配置已存在，跳过
-        # 创建新的配置项
+            continue
         config = Config(
             key=key,
             value_str=default if isinstance(default, str) else None,
-            value_bool=default if isinstance(default, bool) else None
+            value_bool=default if isinstance(default, bool) else None,
         )
         await add_config(config, default)
