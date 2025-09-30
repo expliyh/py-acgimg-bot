@@ -47,7 +47,10 @@ async def lifespan(app: FastAPI):
         await storage.get_config()
     await tg_bot.config()
     await pixiv.read_token_from_config()
-    pixiv.token_refresh()
+    if pixiv.enabled:
+        pixiv.token_refresh()
+    else:
+        logger.warning("Pixiv features disabled due to missing token")
 
     # 新增：初始化数据库配置
     try:
