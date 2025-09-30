@@ -24,6 +24,34 @@ export interface DashboardSummary {
   recent_activity: DashboardActivityEntry[];
 }
 
+export interface CommandHistoryItem {
+  id: number;
+  command: string;
+  user_id: number | null;
+  chat_id: number | null;
+  chat_type: string | null;
+  message_id: number | null;
+  arguments: string[] | null;
+  raw_text: string | null;
+  success: boolean;
+  error_message: string | null;
+  duration_ms: number | null;
+  triggered_at: string;
+}
+
+export interface CommandHistoryResponse {
+  total: number;
+  items: CommandHistoryItem[];
+}
+
+export interface CommandHistoryQuery {
+  command?: string;
+  user_id?: number;
+  success?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 export interface EnumOption {
   label: string;
   value: string;
@@ -203,5 +231,12 @@ export async function fetchFeatureFlags(): Promise<FeatureFlagResponse> {
 
 export async function updateFeatureFlag(key: string, value: boolean): Promise<FeatureFlag> {
   const { data } = await client.put<FeatureFlag>(`/config/features/${key}`, { value });
+  return data;
+}
+
+export async function listCommandHistory(
+  params: CommandHistoryQuery
+): Promise<CommandHistoryResponse> {
+  const { data } = await client.get<CommandHistoryResponse>('/commands/history', { params });
   return data;
 }

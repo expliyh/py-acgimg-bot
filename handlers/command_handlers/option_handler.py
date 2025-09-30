@@ -6,8 +6,10 @@ from telegram.ext import CommandHandler
 import messase_generator
 from utils import is_group_type, delete_messages
 from registries import user_registry, group_registry, engine
+from services.command_history import command_logger
 
 
+@command_logger("option")
 async def option_handler_func(update: Update, context) -> None:
     """
     处理用户配置命令

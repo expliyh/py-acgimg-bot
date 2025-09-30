@@ -13,7 +13,7 @@ from bot import tg_bot
 
 from contextlib import asynccontextmanager
 from registries import engine, config_registry
-from routers import configs as config_routes, dashboard, groups, private
+from routers import configs as config_routes, dashboard, groups, private, commands
 import uvicorn
 
 from configs import config, db_config_declare
@@ -74,6 +74,7 @@ for router in (
     groups.router,
     private.router,
     config_routes.router,
+    commands.router,
 ):
     app.include_router(router)
 

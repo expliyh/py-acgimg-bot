@@ -2,8 +2,10 @@ from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
 
 from services import pixiv
+from services.command_history import command_logger
 
 
+@command_logger("pinfo")
 async def p_info_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not pixiv.enabled:
         await update.message.reply_text(

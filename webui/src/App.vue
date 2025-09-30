@@ -12,6 +12,7 @@ const navItems = [
   { label: '仪表盘', icon: 'pi pi-chart-line', to: '/dashboard' },
   { label: '群组管理', icon: 'pi pi-users', to: '/groups' },
   { label: '私聊管理', icon: 'pi pi-comments', to: '/private' },
+  { label: '命令历史', icon: 'pi pi-list', to: '/commands' },
   { label: '功能配置', icon: 'pi pi-sliders-h', to: '/features' }
 ];
 

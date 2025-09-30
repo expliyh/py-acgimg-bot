@@ -7,8 +7,10 @@ from telegram.constants import ParseMode
 import messase_generator
 from utils import is_group_type, delete_messages
 from registries import user_registry, group_registry, engine
+from services.command_history import command_logger
 
 
+@command_logger("admin")
 async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     处理机器人管理命令

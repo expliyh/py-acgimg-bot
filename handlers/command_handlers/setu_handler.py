@@ -10,8 +10,10 @@ from utils import is_group_type
 
 from registries import user_registry, group_registry
 from services.image_service import get_image
+from services.command_history import command_logger
 
 
+@command_logger("setu")
 async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = await user_registry.get_user_by_id(update.effective_user.id)
     if user.status == UserStatus.BLOCKED:
