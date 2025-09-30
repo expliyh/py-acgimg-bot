@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import logging
 
 from pathlib import Path
@@ -19,7 +19,6 @@ import uvicorn
 from configs import config, db_config_declare
 from registries.config_registry import init_database_config
 from services import pixiv, storage_service
-from services.storage_service import backblaze
 
 # Enable logging
 logging.basicConfig(
@@ -39,8 +38,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 应用启动时的逻辑
+    # Tasks to run during application startup
     await engine.create_all()
+    await storage_service.ensure_storage_config_defaults()
     storage = await storage_service.use()
     if storage is None:
         logger.warning("No storage service set")
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Pixiv features disabled due to missing token")
 
-    # 新增：初始化数据库配置
+    # Initialize database configuration defaults
     try:
         await init_database_config(db_config_declare)
         logger.info("Database configurations initialized successfully")
@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
     logger.warning("Bot started")
     yield
 
-    # 应用关闭时的逻辑
+    # Tasks to run during application shutdown
     pass
 
 

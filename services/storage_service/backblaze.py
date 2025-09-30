@@ -1,32 +1,14 @@
+from __future__ import annotations
+
 from b2sdk.v2 import InMemoryAccountInfo, B2Api, FileVersion, Bucket
-from fastapi import UploadFile
 
 from registries import config_registry
 from .Storage import Storage
 
 
 class BackBlaze(Storage):
-    async def upload(self, file: bytes, filename: str, sub_folder: str | None = None) -> str:
-        if sub_folder is None:
-            sub_folder = ""
-        else:
-            while sub_folder.startswith("/"):
-                sub_folder = sub_folder[1:]
-            if not sub_folder.endswith("/"):
-                sub_folder += "/"
-        info = {
-            "msg": "Automatic upload by py-acgimg-bot"
-        }
-        file_version: FileVersion = self.bucket.upload_bytes(
-            data_bytes=file,
-            file_name=self.base_path + sub_folder + filename,
-            file_info=info
-        )
-        assert file_version is not None
-        url = self.base_url + "/" + self.base_path + sub_folder + filename
-        return url
-
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__("backblaze")
         self.info = InMemoryAccountInfo()
         self.b2_api = B2Api(self.info)
         self.app_id: str | None = None
@@ -36,16 +18,44 @@ class BackBlaze(Storage):
         self.base_path: str | None = None
         self.base_url: str | None = None
 
-    async def get_config(self):
+    async def _load_config(self) -> None:
         config = await config_registry.get_backblaze_config()
         self.app_id = config.app_id
         self.app_key = config.app_key
         self.bucket_name = config.bucket_name
-        self.base_path = config.base_path
+        self.base_path = config.base_path or ""
         self.base_url = config.base_url
+
+        required = {
+            "app_id": self.app_id,
+            "app_key": self.app_key,
+            "bucket_name": self.bucket_name,
+            "base_url": self.base_url,
+        }
+        missing = [key for key, value in required.items() if not value]
+        if missing:
+            raise RuntimeError(f"Backblaze configuration missing values: {', '.join(missing)}")
+
         self.b2_api.authorize_account("production", self.app_id, self.app_key)
         self.bucket = self.b2_api.get_bucket_by_name(self.bucket_name)
-        return
+
+    async def upload(self, file: bytes, filename: str, sub_folder: str | None = None) -> str:
+        await self.ensure_ready()
+
+        if self.bucket is None:
+            raise RuntimeError("Backblaze bucket is not configured")
+        if self.base_url is None:
+            raise RuntimeError("Backblaze base URL is not configured")
+
+        object_name = self.build_object_path(self.base_path, filename, sub_folder)
+        info = {"msg": "Automatic upload by py-acgimg-bot"}
+        file_version: FileVersion = self.bucket.upload_bytes(
+            data_bytes=file,
+            file_name=object_name,
+            file_info=info,
+        )
+        assert file_version is not None
+        return f"{self.base_url}/{object_name}"
 
 
 backblaze = BackBlaze()
