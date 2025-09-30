@@ -158,6 +158,27 @@ async def get_pixiv_tokens() -> list[Token]:
     return [Token(token=i.value_str or "", enable=bool(i.value_bool)) for i in configs]
 
 
+async def set_pixiv_token(token: str | None) -> None:
+    normalized = _optional_str(token)
+    async with engine.new_session() as session:
+        config = await session.get(Config, "pixiv_token")
+        if config is None:
+            config = Config(key="pixiv_token")
+            session.add(config)
+        config.value_str = normalized
+        await session.commit()
+
+
+async def set_pixiv_token_enabled(enabled: bool) -> None:
+    async with engine.new_session() as session:
+        config = await session.get(Config, "pixiv_token")
+        if config is None:
+            config = Config(key="pixiv_token")
+            session.add(config)
+        config.value_bool = enabled
+        await session.commit()
+
+
 async def get_backblaze_config() -> BackBlazeConfig:
     return BackBlazeConfig(
         app_id=_optional_str(await get_config("backblaze_app_id")),

@@ -1,68 +1,85 @@
-import telegram
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+"""Callback helpers for switching a user's R18G preference."""
+
+from __future__ import annotations
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
+
 from registries import user_registry
-import messase_generator
+
+from .panel import refresh_user_config_panel
+
+_WARNING_TEXT = (
+    "警告：启用 R18G 将允许在涩图请求中返回极度限制级内容。\n"
+    "请确认您已年满 18 岁并理解可能出现的风险。"
+)
 
 
-async def update_panel(update, context):
-    msg = await messase_generator.config_user(1, await user_registry.get_user_by_id(update.effective_user.id))
+async def _apply(update: Update, context: ContextTypes.DEFAULT_TYPE, enable: bool) -> None:
+    user_id = update.effective_user.id
+    await user_registry.set_allow_r18g(user_id, enable)
+
+    query = update.callback_query
+    if query is not None:
+        await query.answer("已启用 R18G" if enable else "已禁用 R18G")
+
+    await refresh_user_config_panel(
+        context,
+        chat_id=update.effective_chat.id,
+        message_id=update.effective_message.message_id,
+        user_id=user_id,
+    )
+
+
+async def _show_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.edit_message_text(
         chat_id=update.effective_chat.id,
         message_id=update.effective_message.message_id,
-        text=msg.text
+        text=_WARNING_TEXT,
     )
     await context.bot.edit_message_reply_markup(
         chat_id=update.effective_chat.id,
         message_id=update.effective_message.message_id,
-        reply_markup=InlineKeyboardMarkup(msg.keyboard)
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("确认启用", callback_data="conf:user:r18g:confirm")],
+                [InlineKeyboardButton("取消", callback_data="conf:user:r18g:cancel")],
+            ]
+        ),
     )
 
-
-async def disable_r18g(update: telegram.Update, context):
-    await user_registry.set_allow_r18g(update.effective_user.id, False)
-    await update_panel(update, context)
-    return
+    query = update.callback_query
+    if query is not None:
+        await query.answer()
 
 
-async def enable_r18g(update: telegram.Update, context):
-    await user_registry.set_allow_r18g(update.effective_user.id, True)
-    await update_panel(update, context)
-    return
+async def switch_r18g(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: list[str]) -> None:
+    query = update.callback_query
+    if query is None or not cmd:
+        return
 
+    action = cmd[0]
 
-async def warn_r18g(update: telegram.Update, context):
-    # 编辑消息文本
-    await context.bot.edit_message_text(
-        chat_id=update.effective_chat.id,
-        message_id=update.effective_message.message_id,
-        text="警告：此内容可能包含不适合所有受众的敏感内容。请确认您已满18岁。"
-    )
+    if action == "off":
+        await _apply(update, context, False)
+        return
 
-    # 创建内联键盘按钮
-    keyboard = [
-        [InlineKeyboardButton("确认", callback_data='conf:user:r18g:confirm')],  # 使用红色圆圈模拟红色按钮
-        [InlineKeyboardButton("取消", callback_data='conf:user:r18g:cancel')]  # 取消按钮
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if action == "on":
+        await _show_confirmation(update, context)
+        return
 
-    # 编辑消息的回复标记
-    await context.bot.edit_message_reply_markup(
-        chat_id=update.effective_chat.id,
-        message_id=update.effective_message.message_id,
-        reply_markup=reply_markup
-    )
+    if action == "confirm":
+        await _apply(update, context, True)
+        return
 
+    if action == "cancel":
+        await query.answer("已取消")
+        await refresh_user_config_panel(
+            context,
+            chat_id=update.effective_chat.id,
+            message_id=update.effective_message.message_id,
+            user_id=update.effective_user.id,
+        )
+        return
 
-async def switch_r18g(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE, cmd: list[str]):
-    match cmd[0]:
-        case 'off':
-            await disable_r18g(update, context)
-        case 'confirm':
-            await enable_r18g(update, context)
-        case 'on':
-            await warn_r18g(update, context)
-        case 'cancel':
-            await update_panel(update, context)
-
-    pass
+    await query.answer()
