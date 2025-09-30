@@ -1,7 +1,10 @@
 import asyncio
 import logging
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 
 from telegram import Update, Bot
 
@@ -10,6 +13,7 @@ from bot import tg_bot
 
 from contextlib import asynccontextmanager
 from registries import engine, config_registry
+from routers import configs as config_routes, dashboard, groups, private
 import uvicorn
 
 from configs import config, db_config_declare
@@ -64,6 +68,26 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+for router in (
+    dashboard.router,
+    groups.router,
+    private.router,
+    config_routes.router,
+):
+    app.include_router(router)
+
+webui_dir = Path(__file__).parent / "webui"
+dist_dir = webui_dir / "dist"
+static_source: Path | None = None
+
+if dist_dir.exists():
+    static_source = dist_dir
+elif webui_dir.exists():
+    static_source = webui_dir
+
+if static_source:
+    app.mount("/admin", StaticFiles(directory=static_source, html=True), name="admin")
 
 
 @app.get("/")

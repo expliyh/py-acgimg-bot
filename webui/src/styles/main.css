@@ -1,0 +1,60 @@
+:root {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--surface-ground);
+  color: var(--text-color);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.p-menubar-root-list > .p-menuitem.active > .p-menuitem-content {
+  background: color-mix(in srgb, var(--primary-color) 15%, transparent);
+}
+
+.layout-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.layout-sidebar {
+  width: 16rem;
+  border-right: 1px solid var(--surface-border);
+  background: var(--surface-card);
+}
+
+.layout-main {
+  flex: 1;
+  min-height: 0;
+  padding: 1.5rem;
+  background: var(--surface-ground);
+}
+
+@media (max-width: 960px) {
+  .layout-content {
+    flex-direction: column;
+  }
+
+  .layout-sidebar {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--surface-border);
+  }
+}
