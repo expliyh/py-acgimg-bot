@@ -45,3 +45,22 @@ async def set_status(user_id: int, status: UserStatus) -> None:
         session: AsyncSession = session
         await session.execute(update(User).where(User.id == user_id).values(status=status))
         await session.commit()
+
+
+async def set_enable_chat(user_id: int, enable_chat: bool) -> None:
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        await session.execute(update(User).where(User.id == user_id).values(enable_chat=enable_chat))
+        await session.commit()
+
+
+async def set_nick_name(user_id: int, nick_name: str | None) -> None:
+    normalized = (nick_name or "").strip()
+    value = normalized if normalized else None
+    if value is not None and len(value) > 64:
+        value = value[:64]
+
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        await session.execute(update(User).where(User.id == user_id).values(nick_name=value))
+        await session.commit()

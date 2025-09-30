@@ -1,57 +1,85 @@
+"""Generation helpers for the Telegram user configuration panel."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from telegram import InlineKeyboardButton
 
+from defines import UserStatus
 from models import User
-from registries import user_registry
 
 
+@dataclass(slots=True)
 class ConfigUser:
-    """
-    用户配置页面
-    """
+    """Container for the rendered user configuration panel."""
+
     text: str
     keyboard: list[list[InlineKeyboardButton]]
 
-    def __init__(self, text, keyboard):
-        self.text = text
-        self.keyboard = keyboard
+
+_STATUS_LABELS = {
+    UserStatus.NORMAL: "正常",
+    UserStatus.INACTIVE: "待启用",
+    UserStatus.BLOCKED: "已封禁",
+}
 
 
-async def config_user(page: int = 1, user: User = None) -> ConfigUser:
-    """
-    生成用户配置页面
-    :param user: 用户对象， 与 UID 至少指定一个，同时指定时优先使用 user
-    :param page: 可选, 当前页码，默认首页
-    :return: 用户配置页面
-    """
-    # 每页显示 5 个选项
-    option_per_page = 5
-    offset = (page - 1) * option_per_page
-    # 当 user 和 uid 同时为空时抛出异常
+def _bool_icon(value: bool) -> str:
+    return "✅" if value else "❌"
+
+
+def _display_status(status: UserStatus | None) -> str:
+    if status is None:
+        return "未知"
+    return _STATUS_LABELS.get(status, status.value)
+
+
+def _shorten(text: str, limit: int = 20) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1]}…"
+
+
+async def config_user(page: int = 1, user: User | None = None) -> ConfigUser:
+    """Compose the inline configuration panel for the given user."""
+
     if user is None:
-        raise ValueError('user 不能为空')
-    # 当 user 为空时从数据库获取用户对象
-    config: [(str, str)] = [
-        ('昵称', user.nick_name),
-        ('启用 AI 聊天', '是' if user.enable_chat else '否'),
-        ('过滤等级', str(user.sanity_limit - 1)),
-        ('允许 R18G', '是' if user.allow_r18g else '否')
+        raise ValueError("user 不能为空")
+
+    nick = user.nick_name.strip() if user.nick_name else "未设置"
+    display_nick = _shorten(nick)
+    sanity_level = max(user.sanity_limit - 1, 0)
+
+    lines = [
+        "用户配置面板",
+        "",
+        f"用户 ID: {user.id}",
+        f"状态: {_display_status(user.status)}",
+        f"昵称: {nick}",
+        f"AI 聊天: {_bool_icon(user.enable_chat)}",
+        f"过滤等级: L{sanity_level}",
+        f"允许 R18G: {_bool_icon(user.allow_r18g)}",
     ]
-    # config.append(('状态', user.status.value))
-    keyboard: [[InlineKeyboardButton]] = [
-        [InlineKeyboardButton('上一页', callback_data=f'conf:page:goto:{page - 1}')]
-    ] if page > 1 else []
-    all_keyboard = [
-        [InlineKeyboardButton(f'修改昵称 (当前: {user.nick_name})', callback_data=f'conf:user:nick:edit')],
-        [InlineKeyboardButton(
-            '禁用 AI 聊天' if user.enable_chat else '启用 AI 聊天',
-            callback_data=f'conf:user:chat:on' if not user.enable_chat else 'conf:user:chat:off')],
-        [InlineKeyboardButton(f'修改过滤等级 (当前: {user.sanity_limit - 1})', callback_data='conf:user:san:edit')],
-        [InlineKeyboardButton(
-            '禁用 R18G' if user.allow_r18g else '启用 R18G',
-            callback_data=f'conf:user:r18g:on' if not user.allow_r18g else 'conf:user:r18g:off')]
+
+    text = "\n".join(lines)
+
+    keyboard: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("刷新", callback_data="conf:user:panel:refresh")],
+        [InlineKeyboardButton(f"修改昵称 (当前: {display_nick})", callback_data="conf:user:nick:edit")],
+        [
+            InlineKeyboardButton(
+                ("禁用 AI 聊天" if user.enable_chat else "启用 AI 聊天"),
+                callback_data="conf:user:chat:off" if user.enable_chat else "conf:user:chat:on",
+            )
+        ],
+        [InlineKeyboardButton(f"调整过滤等级 (L{sanity_level})", callback_data="conf:user:san:edit")],
+        [
+            InlineKeyboardButton(
+                "禁用 R18G" if user.allow_r18g else "启用 R18G",
+                callback_data="conf:user:r18g:off" if user.allow_r18g else "conf:user:r18g:on",
+            )
+        ],
     ]
-    keyboard += all_keyboard[offset:offset + option_per_page]
-    if offset + option_per_page < len(all_keyboard):
-        keyboard.append([InlineKeyboardButton('下一页', callback_data=f'conf:page:goto:{page + 1}')])
-    text = f'用户配置 ({page}/{len(all_keyboard) // option_per_page + 1})\n\n'
-    return ConfigUser(text, keyboard)
+
+    return ConfigUser(text=text, keyboard=keyboard)

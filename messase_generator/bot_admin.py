@@ -1,60 +1,129 @@
+"""Generation helpers for the Telegram bot admin configuration panel."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from telegram import InlineKeyboardButton
 from telegram.helpers import escape_markdown
 
 from registries import config_registry
 
 
+@dataclass(slots=True)
 class BotAdmin:
-    """
-    用户配置页面
-    """
     text: str
     keyboard: list[list[InlineKeyboardButton]]
 
-    def __init__(self, text, keyboard):
-        self.text = text
-        self.keyboard = keyboard
+
+def _bool_icon(value: bool) -> str:
+    return "✅" if value else "❌"
 
 
-# 配置按钮的数据结构
-CONFIG_BUTTONS = [
-    {'text': 'Pixiv Token', 'callback_data': 'conf:bot:pixiv:token:edit'},
-    {'text': 'Storage', 'callback_data': 'conf:bot:storage:edit'},
-    {'text': 'API Key', 'callback_data': 'conf:bot:api_key:edit'},
-    {'text': 'Log Level', 'callback_data': 'conf:bot:log_level:edit'},
-    {'text': 'Notification', 'callback_data': 'conf:bot:notification:edit'},
-]
+def _is_truthy(value: object | None) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+    return False
 
 
-async def bot_admin(page: int = 1):
-    # 每页显示的选项数量
-    option_per_page = 5
+def _storage_label(current: str | None) -> str:
+    mapping = {
+        "local": "本地存储",
+        "backblaze": "Backblaze B2",
+        "webdav": "WebDAV",
+        "disabled": "已禁用",
+        "none": "未设置",
+    }
+    if not current:
+        return "未设置"
+    return mapping.get(current.lower(), current)
 
-    # 计算偏移量
-    offset = (page - 1) * option_per_page
 
-    # 初始化文本和键盘
-    text = '*机器人配置*\n\n'
-    keyboard = []
+def _backblaze_ready(config) -> bool:
+    return bool(config.app_id and config.app_key and config.bucket_name)
 
-    # 添加上一页按钮（如果当前不是第一页）
-    if page > 1:
-        keyboard.append([InlineKeyboardButton('上一页', callback_data=f'conf:page:goto:{page - 1}')])
 
-    # 添加当前页的配置按钮
-    current_page_buttons = CONFIG_BUTTONS[offset:offset + option_per_page]
-    for button in current_page_buttons:
-        keyboard.append([InlineKeyboardButton(button['text'], callback_data=button['callback_data'])])
+def _webdav_ready(config) -> bool:
+    return bool(config.endpoint and config.username and config.password)
 
-    # 添加下一页按钮（如果还有更多按钮）
-    if offset + option_per_page < len(CONFIG_BUTTONS):
-        keyboard.append([InlineKeyboardButton('下一页', callback_data=f'conf:page:goto:{page + 1}')])
 
-    # 获取并显示配置状态
-    pixiv_token_status = '已设置' if (await config_registry.get_pixiv_tokens()) is not None else '未设置'
-    storage_status = await config_registry.get_config('storage_service_use') or '未设置'
+def _local_ready(config) -> bool:
+    return bool(config.root_path)
 
-    text += escape_markdown(f'- Pixiv Token: {pixiv_token_status}\n\n', version=2)
-    text += escape_markdown(f'- Storage: {storage_status}\n\n', version=2)
 
-    return BotAdmin(text, keyboard)
+def _md(line: str) -> str:
+    return escape_markdown(line, version=2)
+
+
+async def bot_admin(page: int = 1) -> BotAdmin:
+    allow_r18g = _is_truthy(await config_registry.get_config("allow_r18g"))
+    enable_on_new_group = _is_truthy(await config_registry.get_config("enable_on_new_group"))
+
+    storage_choice = await config_registry.get_config("storage_service_use")
+    if isinstance(storage_choice, str):
+        storage_choice = storage_choice.strip().lower() or None
+
+    backblaze_config = await config_registry.get_backblaze_config()
+    webdav_config = await config_registry.get_webdav_config()
+    local_config = await config_registry.get_local_storage_config()
+
+    pixiv_tokens = await config_registry.get_pixiv_tokens()
+    pixiv_configured = any(token.token for token in pixiv_tokens)
+    pixiv_enabled = any(token.enable for token in pixiv_tokens)
+
+    lines = [
+        "机器人配置面板",
+        "",
+        "功能开关:",
+        f"- 允许 R18G: {_bool_icon(allow_r18g)}",
+        f"- 新群自动启用: {_bool_icon(enable_on_new_group)}",
+        "",
+        "存储服务:",
+        f"- 当前驱动: {_storage_label(storage_choice)}",
+        f"  · 本地存储: {'已配置' if _local_ready(local_config) else '未配置'}",
+        f"  · Backblaze B2: {'已配置' if _backblaze_ready(backblaze_config) else '未配置'}",
+        f"  · WebDAV: {'已配置' if _webdav_ready(webdav_config) else '未配置'}",
+        "",
+        "Pixiv Tokens:",
+        f"- 配置数量: {len(pixiv_tokens)}",
+        f"- 已启用: {pixiv_enabled and '是' or '否'}",
+        f"- 可用: {pixiv_configured and '是' or '否'}",
+    ]
+
+    text = "\n".join(_md(line) for line in lines)
+
+    keyboard: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                f"切换允许 R18G ({'开启' if allow_r18g else '关闭'})",
+                callback_data="conf:bot:feature:allow_r18g:toggle",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"切换新群自动启用 ({'开启' if enable_on_new_group else '关闭'})",
+                callback_data="conf:bot:feature:enable_on_new_group:toggle",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"设置存储服务 ({_storage_label(storage_choice)})",
+                callback_data="conf:bot:storage:menu",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "配置 Pixiv API",
+                callback_data="conf:bot:pixiv:menu",
+            )
+        ],
+        [InlineKeyboardButton("刷新", callback_data="conf:bot:panel:refresh")],
+    ]
+
+    return BotAdmin(text=text, keyboard=keyboard)
