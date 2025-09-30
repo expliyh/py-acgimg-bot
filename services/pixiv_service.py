@@ -13,18 +13,27 @@ class PixivService:
     def __init__(self):
         self.valid_until: int | None = None
         self.token: str | None = None
+        self.enabled: bool = False
         self.api = AppPixivAPI()
 
     async def read_token_from_config(self):
         tokens = await config_registry.get_pixiv_tokens()
+        if len(tokens) == 0:
+            logger.warning("No Pixiv token configured, Pixiv features disabled")
+            self.token = None
+            self.valid_until = None
+            self.enabled = False
+            return
         if len(tokens) > 1:
-            raise Exception("More than one Pixiv token found")
+            logger.warning("More than one Pixiv token found, using the first one")
         self.token = tokens[0].token
         self.valid_until = 0
+        self.enabled = True
 
     def token_refresh(self, force: bool = False):
-        if self.token is None:
-            raise Exception("Pixiv token not found")
+        if not self.enabled or self.token is None:
+            logger.debug("Pixiv token refresh skipped because the feature is disabled")
+            return
         if not force and self.valid_until > int(time.time()):
             return
         response = self.api.auth(refresh_token=self.token)
@@ -33,6 +42,8 @@ class PixivService:
         return
 
     async def get_raw(self, pixiv_id: int):
+        if not self.enabled:
+            raise RuntimeError("Pixiv features are disabled")
         self.token_refresh()
         response = self.api.illust_detail(pixiv_id)
         if response.get("error") is not None:
@@ -41,6 +52,8 @@ class PixivService:
         return response
 
     async def get_illust_info_by_pixiv_id(self, pixiv_id: int) -> Illustration:
+        if not self.enabled:
+            raise RuntimeError("Pixiv features are disabled")
         self.token_refresh()
         illust_info_dict: dict = self.api.illust_detail(pixiv_id)['illust']
         illust = build_illust_from_api_dict(illust_info_dict)
