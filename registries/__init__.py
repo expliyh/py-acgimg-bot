@@ -5,5 +5,6 @@ from . import (
     user_registry,
     group_registry,
     config_registry,
-    active_message_handler_registry
+    active_message_handler_registry,
+    command_history_registry,
 )

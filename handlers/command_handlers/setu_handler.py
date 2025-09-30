@@ -1,7 +1,7 @@
 from io import BytesIO
 
 from telegram import Update
-from telegram.ext import CommandHandler, ContextTypes
+from telegram.ext import ContextTypes
 
 from defines import GroupStatus, UserStatus
 from exps import UserBlockedError, GroupBlockedError
@@ -10,8 +10,11 @@ from utils import is_group_type
 
 from registries import user_registry, group_registry
 from services.image_service import get_image
+from services.command_history import command_logger
+from handlers.registry import bot_handler
 
-
+@bot_handler
+@command_logger("setu")
 async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = await user_registry.get_user_by_id(update.effective_user.id)
     if user.status == UserStatus.BLOCKED:
@@ -65,5 +68,3 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_to_message_id=update.effective_message.id,
     )
 
-
-setu_handler = CommandHandler("setu", setu)

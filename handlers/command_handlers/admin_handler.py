@@ -1,14 +1,18 @@
 import asyncio
 
 from telegram import Update, Message, InlineKeyboardMarkup
-from telegram.ext import CommandHandler, ContextTypes
+from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 import messase_generator
 from utils import is_group_type, delete_messages
 from registries import user_registry, group_registry, engine
+from services.command_history import command_logger
+from handlers.registry import bot_handler
 
 
+@bot_handler
+@command_logger("admin")
 async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     处理机器人管理命令
@@ -41,5 +45,3 @@ async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     return
 
-
-admin_handler = CommandHandler('admin', admin_handler_func)

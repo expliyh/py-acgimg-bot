@@ -23,6 +23,11 @@ const router = createRouter({
       component: () => import('@/views/PrivateChatsView.vue')
     },
     {
+      path: '/commands',
+      name: 'commands',
+      component: () => import('@/views/CommandHistoryView.vue')
+    },
+    {
       path: '/features',
       name: 'features',
       component: () => import('@/views/FeatureConfigView.vue')
