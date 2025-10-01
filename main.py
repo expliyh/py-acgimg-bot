@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     await tg_bot.config()
     await pixiv.read_token_from_config()
     if pixiv.enabled:
-        pixiv.token_refresh()
+        await pixiv.token_refresh()
     else:
         logger.warning("Pixiv features disabled due to missing token")
 
