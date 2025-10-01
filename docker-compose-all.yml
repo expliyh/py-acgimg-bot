@@ -15,7 +15,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - storage:/storage
+      - storage:/app/storage
 
   mariadb:
     image: mariadb:11.4

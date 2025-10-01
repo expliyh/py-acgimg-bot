@@ -28,8 +28,8 @@ ENV DATABASE_PASSWORD=your_password
 ENV DATABASE_PREFIX=acgimg
 ENV TZ=Asia/Shanghai
 
-RUN mkdir -p /images
-VOLUME /images
+RUN mkdir -p /app/storage
+VOLUME /app/storage
 
 EXPOSE 8000
 
