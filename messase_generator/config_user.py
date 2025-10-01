@@ -35,13 +35,19 @@ def _display_status(status: UserStatus | None) -> str:
     return _STATUS_LABELS.get(status, status.value)
 
 
+
+
+def _build_callback(base: str, command_message_id: int | None) -> str:
+    if command_message_id is None:
+        return base
+    return f"{base}:{command_message_id}"
 def _shorten(text: str, limit: int = 20) -> str:
     if len(text) <= limit:
         return text
     return f"{text[: limit - 1]}…"
 
 
-async def config_user(page: int = 1, user: User | None = None) -> ConfigUser:
+async def config_user(page: int = 1, user: User | None = None, *, command_message_id: int | None = None) -> ConfigUser:
     """Compose the inline configuration panel for the given user."""
 
     if user is None:
@@ -65,7 +71,10 @@ async def config_user(page: int = 1, user: User | None = None) -> ConfigUser:
     text = "\n".join(lines)
 
     keyboard: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton("刷新", callback_data="conf:user:panel:refresh")],
+        [
+            InlineKeyboardButton("刷新", callback_data=_build_callback("conf:user:panel:refresh", command_message_id)),
+            InlineKeyboardButton("关闭", callback_data=_build_callback("conf:user:panel:close", command_message_id)),
+        ],
         [InlineKeyboardButton(f"修改昵称 (当前: {display_nick})", callback_data="conf:user:nick:edit")],
         [
             InlineKeyboardButton(

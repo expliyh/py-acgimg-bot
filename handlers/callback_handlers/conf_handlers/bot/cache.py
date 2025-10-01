@@ -5,13 +5,16 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from handlers.callback_handlers.panel_utils import build_callback_data, get_panel_command_message_id
 from registries import active_message_handler_registry, config_registry
 from services.telegram_cache import telegram_cache_manager
 
 from .panel import refresh_bot_config_panel
 
 
-def _build_menu(config: config_registry.TelegramCacheConfig) -> InlineKeyboardMarkup:
+def _build_menu(
+    config: config_registry.TelegramCacheConfig, *, command_message_id: int | None
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
     rows.append(
@@ -59,7 +62,7 @@ def _build_menu(config: config_registry.TelegramCacheConfig) -> InlineKeyboardMa
             ]
         )
 
-    rows.append([InlineKeyboardButton("返回", callback_data="conf:bot:panel:refresh")])
+    rows.append([InlineKeyboardButton("返回", callback_data=build_callback_data("conf:bot:panel:refresh", command_message_id))])
 
     return InlineKeyboardMarkup(rows)
 
@@ -72,8 +75,11 @@ async def handle_cache(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
     action = cmd[0]
     config = await config_registry.get_telegram_cache_config()
 
+    panel_message_id = update.effective_message.message_id
+    command_message_id = get_panel_command_message_id(context, panel_message_id)
+
     if action == "menu":
-        markup = _build_menu(config)
+        markup = _build_menu(config, command_message_id=command_message_id)
         await context.bot.edit_message_reply_markup(
             chat_id=update.effective_chat.id,
             message_id=update.effective_message.message_id,
@@ -93,7 +99,8 @@ async def handle_cache(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         await refresh_bot_config_panel(
             context,
             chat_id=update.effective_chat.id,
-            message_id=update.effective_message.message_id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
         )
         return
 
@@ -131,7 +138,8 @@ async def handle_cache(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         await refresh_bot_config_panel(
             context,
             chat_id=update.effective_chat.id,
-            message_id=update.effective_message.message_id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
         )
         return
 

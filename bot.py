@@ -5,7 +5,7 @@ from typing import Literal
 
 from fastapi import Request
 
-from telegram import Bot, Update
+from telegram import Bot, Update, BotCommand
 from telegram.ext import Application, CommandHandler
 
 from configs import config
@@ -13,6 +13,14 @@ from handlers import all_handlers
 from registries import config_registry
 
 logger = logging.getLogger(__name__)
+
+BOT_COMMAND_DEFINITIONS: list[tuple[str, str]] = [
+    ("start", "开始使用机器人"),
+    ("setu", "发送随机涩图"),
+    ("option", "打开个人设置"),
+    ("admin", "打开管理面板"),
+    ("pinfo", "查看 Pixiv 插画信息"),
+]
 
 
 async def start(update: Update, context) -> None:
@@ -68,6 +76,8 @@ class TelegramBot:
             logger.exception("Failed to initialize Telegram application")
             await self._shutdown()
             return
+
+        await self._register_commands()
 
         self._app_initialized = True
 
@@ -153,6 +163,36 @@ class TelegramBot:
 
         self._mode = "polling"
         logger.info("Telegram bot configured to use polling mode")
+
+    def _build_supported_commands(self) -> list[BotCommand]:
+        return [BotCommand(name, description) for name, description in BOT_COMMAND_DEFINITIONS]
+
+    async def _register_commands(self) -> None:
+        if not self.tg_bot:
+            logger.warning("Cannot register commands without an initialized bot instance")
+            return
+
+        desired_commands = self._build_supported_commands()
+        try:
+            existing_commands = await self.tg_bot.get_my_commands()
+        except Exception:
+            logger.exception("Failed to fetch existing bot commands; forcing command refresh")
+            existing_commands = []
+
+        if existing_commands == desired_commands:
+            return
+
+        try:
+            await self.tg_bot.delete_my_commands()
+        except Exception:
+            logger.exception("Failed to clear existing bot commands before update")
+
+        try:
+            await self.tg_bot.set_my_commands(desired_commands)
+        except Exception:
+            logger.exception("Failed to register bot commands on Telegram")
+        else:
+            logger.info("Registered %d bot command(s)", len(desired_commands))
 
     @staticmethod
     def _build_webhook_url(base_url: str) -> str:

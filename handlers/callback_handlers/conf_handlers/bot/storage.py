@@ -5,6 +5,7 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from handlers.callback_handlers.panel_utils import build_callback_data, get_panel_command_message_id
 from registries import config_registry
 
 from .panel import refresh_bot_config_panel
@@ -29,7 +30,7 @@ def _storage_label(value: str | None) -> str:
     return value
 
 
-def _build_menu(current: str | None) -> InlineKeyboardMarkup:
+def _build_menu(current: str | None, *, command_message_id: int | None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for key, label in _STORAGE_OPTIONS:
         suffix = " ✅" if current and current.lower() == key else ""
@@ -39,7 +40,7 @@ def _build_menu(current: str | None) -> InlineKeyboardMarkup:
                 callback_data=f"conf:bot:storage:set:{key}",
             )
         ])
-    rows.append([InlineKeyboardButton("返回", callback_data="conf:bot:panel:refresh")])
+    rows.append([InlineKeyboardButton("返回", callback_data=build_callback_data("conf:bot:panel:refresh", command_message_id))])
     return InlineKeyboardMarkup(rows)
 
 
@@ -53,11 +54,14 @@ async def handle_storage(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
     if isinstance(current, str):
         current = current.strip().lower() or None
 
+    panel_message_id = update.effective_message.message_id
+    command_message_id = get_panel_command_message_id(context, panel_message_id)
+
     if action == "menu":
         await context.bot.edit_message_reply_markup(
             chat_id=update.effective_chat.id,
-            message_id=update.effective_message.message_id,
-            reply_markup=_build_menu(current),
+            message_id=panel_message_id,
+            reply_markup=_build_menu(current, command_message_id=command_message_id),
         )
         await query.answer("请选择存储驱动")
         return
@@ -73,7 +77,8 @@ async def handle_storage(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
         await refresh_bot_config_panel(
             context,
             chat_id=update.effective_chat.id,
-            message_id=update.effective_message.message_id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
         )
         return
 
@@ -82,7 +87,8 @@ async def handle_storage(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
         await refresh_bot_config_panel(
             context,
             chat_id=update.effective_chat.id,
-            message_id=update.effective_message.message_id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
         )
         return
 
