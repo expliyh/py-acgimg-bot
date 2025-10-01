@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -159,6 +160,18 @@ async def get_config(key: str) -> str | bool | None:
 
 async def get_bot_tokens() -> list[Token]:
     configs = await get_configs("bot_token")
+    if not configs:
+        env_token = _optional_str(
+            os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+        )
+        if env_token:
+            record = Config("bot_token")
+            record.value_str = env_token
+            record.value_bool = True
+            async with engine.new_session() as session:
+                await session.merge(record)
+                await session.commit()
+            configs = await get_configs("bot_token")
     return [Token(token=i.value_str or "", enable=bool(i.value_bool), id=None) for i in configs]
 
 
