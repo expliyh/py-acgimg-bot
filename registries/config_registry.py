@@ -165,9 +165,11 @@ async def get_bot_tokens() -> list[Token]:
             os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
         )
         if env_token:
-            record = Config()
-            record.value_str = env_token
-            record.value_bool = True
+            record = Config(
+                key="bot_token",
+                value_str=env_token,
+                value_bool=True,
+            )
             async with engine.new_session() as session:
                 await session.merge(record)
                 await session.commit()
