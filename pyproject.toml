@@ -6,7 +6,7 @@ authors = ["Expliyh <expliyh@outlook.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.13"
 fastapi = "0.115.8"
 uvicorn = "0.34.0"
 python-telegram-bot = {extras = ["all"], version = "21.10"}
