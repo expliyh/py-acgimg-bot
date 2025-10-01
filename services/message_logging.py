@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
 from telegram import Chat, Message, Update, User as TgUser
-from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from defines import MessageType
 from models import Group, GroupChatHistory, PrivateChatHistory, User
 from registries import engine
+from services.telegram_cache import get_cached_admin_ids
 from utils import is_group_type
 
 logger = logging.getLogger(__name__)
@@ -27,10 +27,6 @@ class ParsedMessage:
     text: str | None
     file_id: str | None
     keyboard: dict | list | None
-
-
-_ADMIN_CACHE_TTL = timedelta(minutes=5)
-_admin_cache: dict[int, tuple[datetime, list[int]]] = {}
 
 
 async def log_message_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -299,24 +295,11 @@ def _extract_user_display_name(user: TgUser | None) -> str | None:
 
 
 async def _get_admin_ids(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> list[int] | None:
-    """Fetch and cache administrator IDs for a group chat."""
+    """Fetch administrator IDs for a group chat using the shared cache service."""
 
-    now = datetime.now(timezone.utc)
-    cached = _admin_cache.get(chat_id)
-    if cached and now - cached[0] < _ADMIN_CACHE_TTL:
-        return cached[1]
-
-    try:
-        admins = await context.bot.get_chat_administrators(chat_id)
-    except TelegramError as exc:
-        if cached:
-            logger.debug("Using cached admin list for chat %s due to error: %s", chat_id, exc)
-            return cached[1]
-        logger.warning("Failed to fetch administrators for chat %s: %s", chat_id, exc)
-        return None
-
-    admin_ids = [member.user.id for member in admins if member.user]
-    _admin_cache[chat_id] = (now, admin_ids)
+    admin_ids = await get_cached_admin_ids(context, chat_id)
+    if admin_ids is None:
+        logger.debug("Admin IDs unavailable for chat %s", chat_id)
     return admin_ids
 
 
