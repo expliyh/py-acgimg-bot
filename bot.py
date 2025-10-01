@@ -1,10 +1,11 @@
 import asyncio
 import logging
+from contextlib import suppress
 from typing import Literal
 
 from fastapi import Request
 
-from telegram import Update, Bot
+from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler
 
 from configs import config
@@ -25,32 +26,87 @@ class TelegramBot:
         self.tg_app: Application | None = None
         self.poll_task: asyncio.Task | None = None
         self._mode: Literal["webhook", "polling"] | None = None
+        self._app_initialized = False
 
     async def config(self):
         tokens = await config_registry.get_bot_tokens()
-        if len(tokens) > 1:
-            raise Exception("Too many bot tokens, Multiple bot tokens are currently not supported")
-        if len(tokens) == 0:
-            raise Exception("No bot token found")
+        enabled_tokens = [
+            token for token in tokens if token.enable and token.token and token.token.strip()
+        ]
 
-        self._mode = None
+        if not enabled_tokens:
+            logger.warning(
+                "No enabled Telegram bot token found; Telegram integration is disabled"
+            )
+            await self._shutdown()
+            return
 
-        token = tokens[0]
-        self.tg_bot = Bot(token.token)
-        await self.tg_bot.initialize()
+        if len(enabled_tokens) > 1:
+            logger.warning(
+                "Multiple enabled Telegram bot tokens detected; using the first enabled token"
+            )
 
-        self.tg_app = Application.builder().token(token.token).build()
+        token_value = enabled_tokens[0].token.strip()
+
+        await self._shutdown()
+
+        self.tg_bot = Bot(token_value)
+        try:
+            await self.tg_bot.initialize()
+        except Exception:
+            logger.exception("Failed to initialize Telegram bot with provided token")
+            await self._shutdown()
+            return
+
+        self.tg_app = Application.builder().token(token_value).build()
         self.tg_app.add_handler(CommandHandler("start", start))
         self.tg_app.add_handlers(all_handlers)
 
-        await self.tg_app.initialize()
+        try:
+            await self.tg_app.initialize()
+        except Exception:
+            logger.exception("Failed to initialize Telegram application")
+            await self._shutdown()
+            return
+
+        self._app_initialized = True
 
         external_url = config.external_url.strip() if config.external_url else ""
         if external_url:
-            await self._ensure_webhook_mode(external_url)
-        else:
-            logger.info("EXTERNAL_URL not provided; falling back to polling mode")
+            try:
+                await self._ensure_webhook_mode(external_url)
+                return
+            except Exception:
+                logger.exception(
+                    "Failed to configure webhook mode; falling back to polling mode"
+                )
+
+        try:
             await self._ensure_polling_mode()
+        except Exception:
+            logger.exception(
+                "Failed to configure Telegram bot in polling mode; disabling Telegram integration"
+            )
+            await self._shutdown()
+
+    async def _shutdown(self) -> None:
+        if self.poll_task:
+            self.poll_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.poll_task
+            self.poll_task = None
+
+        if self.tg_app:
+            if self.tg_app.running:
+                await self.tg_app.stop()
+            if self._app_initialized:
+                with suppress(RuntimeError):
+                    await self.tg_app.shutdown()
+            self.tg_app = None
+
+        self.tg_bot = None
+        self._mode = None
+        self._app_initialized = False
 
     async def _ensure_webhook_mode(self, external_url: str) -> None:
         if not self.tg_bot or not self.tg_app:
@@ -69,9 +125,7 @@ class TelegramBot:
         logger.info("Telegram bot configured to use webhook mode: %s", webhook_url)
 
     async def _custom_polling(self, interval: float = 2.0):
-        """
-        自定义轮询：每隔 interval 秒调用 get_updates
-        """
+        """Custom polling: fetch updates every `interval` seconds."""
         offset = 0
         while True:
             print("POLL")
@@ -79,7 +133,7 @@ class TelegramBot:
                 updates = await self.tg_bot.get_updates(offset=offset, timeout=10)
                 for update in updates:
                     offset = update.update_id + 1
-                    # ✅ 关键：手动交给 PTB 处理
+                    # Hand updates over to PTB manually
                     await self.tg_app.process_update(update)
             except Exception as e:
                 print(f"Polling error: {e}")

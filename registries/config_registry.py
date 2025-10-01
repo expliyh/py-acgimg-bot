@@ -172,7 +172,14 @@ async def get_bot_tokens() -> list[Token]:
                 await session.merge(record)
                 await session.commit()
             configs = await get_configs("bot_token")
-    return [Token(token=i.value_str or "", enable=bool(i.value_bool), id=None) for i in configs]
+    return [
+        Token(
+            token=i.value_str or "",
+            enable=True if i.value_bool is None else bool(i.value_bool),
+            id=None,
+        )
+        for i in configs
+    ]
 
 
 async def get_pixiv_tokens() -> list[Token]:
@@ -296,13 +303,13 @@ async def get_telegram_cache_config() -> TelegramCacheConfig:
 async def set_telegram_cache_backend(backend: str) -> None:
     normalized = _optional_str(backend)
     if normalized not in {"memory", "redis"}:
-        raise ValueError("缓存后端必须为 'memory' 或 'redis'")
+        raise ValueError("缓存后端必须�?'memory' �?'redis'")
     await update_config("telegram_cache_backend", normalized)
 
 
 async def set_telegram_cache_ttl(ttl_seconds: int) -> None:
     if ttl_seconds < 30:
-        raise ValueError("缓存 TTL 必须至少为 30 秒")
+        raise ValueError("缓存 TTL 必须至少30?")
     await update_config("telegram_cache_ttl_seconds", str(ttl_seconds))
 
 
