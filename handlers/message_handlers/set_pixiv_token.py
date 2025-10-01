@@ -18,6 +18,19 @@ _HANDLER_PREFIX = "set_pixiv_token"
 _CANCEL_TOKEN = "-"
 
 
+async def _delete_message_safely(bot, chat_id: int, message_id: int | None) -> None:
+    if not message_id:
+        return
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Failed to delete message %s in chat %s during Pixiv token setup",
+            message_id,
+            chat_id,
+            exc_info=True,
+        )
+
 async def _reload_pixiv_state() -> None:
     await pixiv.read_token_from_config()
     if pixiv.enabled:
@@ -35,13 +48,16 @@ async def set_pixiv_token(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not handler_key or not handler_key.startswith(_HANDLER_PREFIX):
         return
 
-    parts = handler_key.split(":", 3)
+    parts = handler_key.split(":")
     if len(parts) < 4:
         logger.warning("Pixiv token handler metadata malformed for user %s: %s", user.id, handler_key)
         await active_message_handler_registry.delete(user_id=user.id)
         return
 
-    _, mode, panel_message_id_text, token_id_text = parts
+    mode = parts[1]
+    panel_message_id_text = parts[2]
+    token_id_text = parts[3]
+    prompt_message_id_text = parts[4] if len(parts) >= 5 else None
 
     try:
         panel_message_id = int(panel_message_id_text)
@@ -58,6 +74,13 @@ async def set_pixiv_token(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             logger.warning("Invalid token id '%s' for user %s", token_id_text, user.id)
             await active_message_handler_registry.delete(user_id=user.id)
             return
+
+    prompt_message_id = None
+    if prompt_message_id_text:
+        try:
+            prompt_message_id = int(prompt_message_id_text)
+        except ValueError:
+            logger.warning("Invalid prompt message id '%s' for user %s", prompt_message_id_text, user.id)
 
     submitted = message.text.strip()
 
@@ -86,5 +109,8 @@ async def set_pixiv_token(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         chat_id=message.chat_id,
         message_id=panel_message_id,
     )
+
+    await _delete_message_safely(context.bot, message.chat_id, prompt_message_id)
+    await _delete_message_safely(context.bot, message.chat_id, message.message_id)
 
     await context.bot.send_message(chat_id=message.chat_id, text=feedback)

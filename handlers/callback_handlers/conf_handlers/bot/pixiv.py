@@ -105,12 +105,19 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         return
 
     if action == "add":
+        base_handler_id = f"set_pixiv_token:add:{panel_message_id}:0"
         await active_message_handler_registry.set(
             user_id=user.id,
-            handler_id=f"set_pixiv_token:add:{panel_message_id}:0",
+            handler_id=base_handler_id,
         )
         await query.answer("请输入新的 Refresh Token")
-        await context.bot.send_message(chat_id=chat.id, text=_PROMPT_ADD)
+        prompt_message = await context.bot.send_message(chat_id=chat.id, text=_PROMPT_ADD)
+        prompt_message_id = getattr(prompt_message, "message_id", None)
+        if prompt_message_id:
+            await active_message_handler_registry.set(
+                user_id=user.id,
+                handler_id=f"{base_handler_id}:{prompt_message_id}",
+            )
         return
 
     if action == "token" and len(cmd) >= 2:
@@ -130,12 +137,19 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
 
     if action == "update" and len(cmd) >= 2:
         token_id = cmd[1]
+        base_handler_id = f"set_pixiv_token:update:{panel_message_id}:{token_id}"
         await active_message_handler_registry.set(
             user_id=user.id,
-            handler_id=f"set_pixiv_token:update:{panel_message_id}:{token_id}",
+            handler_id=base_handler_id,
         )
         await query.answer("请输入新的 Refresh Token")
-        await context.bot.send_message(chat_id=chat.id, text=_PROMPT_UPDATE)
+        prompt_message = await context.bot.send_message(chat_id=chat.id, text=_PROMPT_UPDATE)
+        prompt_message_id = getattr(prompt_message, "message_id", None)
+        if prompt_message_id:
+            await active_message_handler_registry.set(
+                user_id=user.id,
+                handler_id=f"{base_handler_id}:{prompt_message_id}",
+            )
         return
 
     if action == "toggle" and len(cmd) >= 2:
