@@ -28,7 +28,7 @@ class PixivService:
             logger.warning("More than one Pixiv token found, using the first one")
         self.token = tokens[0].token
         self.valid_until = 0
-        self.enabled = True
+        self.enabled = False
 
     def token_refresh(self, force: bool = False):
         if not self.enabled or self.token is None:

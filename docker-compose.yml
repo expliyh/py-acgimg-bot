@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: .
+    image: py-acgimg-bot:latest
+    environment:
+      DATABASE_HOST: mariadb
+      DATABASE_PORT: 3306
+      DATABASE_NAME: acgimg
+      DATABASE_USERNAME: acgimg
+      DATABASE_PASSWORD: change_me
+      DATABASE_PREFIX: acgimg
+      TZ: Asia/Shanghai
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage:/app/storage
+
+volumes:
+  storage:

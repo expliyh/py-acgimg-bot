@@ -1,0 +1,44 @@
+services:
+  app:
+    build:
+      context: .
+    image: py-acgimg-bot:latest
+    env_file:
+      - .env
+    environment:
+      DATABASE_HOST: mariadb
+      DATABASE_PORT: 3306
+      TZ: ${TZ:-Asia/Shanghai}
+    depends_on:
+      - mariadb
+      - redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage:/app/storage
+
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change_me}
+      MARIADB_DATABASE: ${DATABASE_NAME:-acgimg}
+      MARIADB_USER: ${DATABASE_USERNAME:-acgimg}
+      MARIADB_PASSWORD: ${DATABASE_PASSWORD:-change_me}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    command: >-
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mariadb_data:
+  redis_data:
+  storage:
