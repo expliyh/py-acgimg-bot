@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
-from models import Config
+from models import Config, PixivToken
 from .engine import engine
 
 
@@ -22,6 +22,7 @@ def _optional_str(value: str | bool | None) -> str | None:
 class Token:
     token: str
     enable: bool
+    id: int | None = None
 
 
 @dataclass(slots=True)
@@ -158,12 +159,93 @@ async def get_config(key: str) -> str | bool | None:
 
 async def get_bot_tokens() -> list[Token]:
     configs = await get_configs("bot_token")
-    return [Token(token=i.value_str or "", enable=bool(i.value_bool)) for i in configs]
+    return [Token(token=i.value_str or "", enable=bool(i.value_bool), id=None) for i in configs]
 
 
 async def get_pixiv_tokens() -> list[Token]:
-    configs = await get_configs("pixiv_token")
-    return [Token(token=i.value_str or "", enable=bool(i.value_bool)) for i in configs]
+    async with engine.new_session() as session:
+        result = await session.execute(select(PixivToken).order_by(PixivToken.id))
+        records = list(result.scalars())
+
+        migrated = False
+        if not records:
+            legacy = await session.get(Config, "pixiv_token")
+            if legacy:
+                normalized = _optional_str(legacy.value_str)
+                enabled = bool(legacy.value_bool)
+                if normalized:
+                    record = PixivToken(refresh_token=normalized, enabled=enabled)
+                    session.add(record)
+                    await session.flush()
+                    records = [record]
+                    migrated = True
+                if legacy.value_str is not None or legacy.value_bool is not None:
+                    legacy.value_str = None
+                    legacy.value_bool = None
+                    migrated = True
+
+        if migrated:
+            await session.commit()
+            result = await session.execute(select(PixivToken).order_by(PixivToken.id))
+            records = list(result.scalars())
+
+        return [Token(token=item.refresh_token, enable=bool(item.enabled), id=item.id) for item in records]
+
+async def add_pixiv_token(token: str, *, enabled: bool = True) -> Token:
+    normalized = _optional_str(token)
+    if not normalized:
+        raise ValueError("Pixiv token cannot be empty")
+
+    async with engine.new_session() as session:
+        record = PixivToken(refresh_token=normalized, enabled=enabled)
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+        return Token(token=record.refresh_token, enable=bool(record.enabled), id=record.id)
+
+
+async def update_pixiv_token(token_id: int, token: str) -> None:
+    normalized = _optional_str(token)
+    if not normalized:
+        raise ValueError("Pixiv token cannot be empty")
+
+    async with engine.new_session() as session:
+        record = await session.get(PixivToken, token_id)
+        if record is None:
+            raise ValueError(f"Pixiv token {token_id} does not exist")
+        record.refresh_token = normalized
+        await session.commit()
+
+
+async def set_pixiv_token_enabled(token_id: int, enabled: bool) -> None:
+    async with engine.new_session() as session:
+        record = await session.get(PixivToken, token_id)
+        if record is None:
+            raise ValueError(f"Pixiv token {token_id} does not exist")
+        record.enabled = enabled
+        await session.commit()
+
+
+async def set_all_pixiv_tokens_enabled(enabled: bool) -> None:
+    async with engine.new_session() as session:
+        await session.execute(
+            update(PixivToken).values(enabled=enabled)
+        )
+        await session.commit()
+
+
+async def delete_pixiv_token(token_id: int) -> None:
+    async with engine.new_session() as session:
+        await session.execute(
+            delete(PixivToken).where(PixivToken.id == token_id)
+        )
+        await session.commit()
+
+
+async def delete_all_pixiv_tokens() -> None:
+    async with engine.new_session() as session:
+        await session.execute(delete(PixivToken))
+        await session.commit()
 
 
 def _normalize_cache_backend(value: str | bool | None) -> Literal["memory", "redis"]:
@@ -215,26 +297,6 @@ async def set_telegram_cache_redis_url(url: str | None) -> None:
     normalized = _optional_str(url)
     await update_config("telegram_cache_redis_url", normalized or "")
 
-
-async def set_pixiv_token(token: str | None) -> None:
-    normalized = _optional_str(token)
-    async with engine.new_session() as session:
-        config = await session.get(Config, "pixiv_token")
-        if config is None:
-            config = Config(key="pixiv_token")
-            session.add(config)
-        config.value_str = normalized
-        await session.commit()
-
-
-async def set_pixiv_token_enabled(enabled: bool) -> None:
-    async with engine.new_session() as session:
-        config = await session.get(Config, "pixiv_token")
-        if config is None:
-            config = Config(key="pixiv_token")
-            session.add(config)
-        config.value_bool = enabled
-        await session.commit()
 
 
 async def get_backblaze_config() -> BackBlazeConfig:

@@ -1,5 +1,6 @@
-from .base import Base
+﻿from .base import Base
 from .configs import Config
+from .pixiv_tokens import PixivToken
 from .groups import Group
 from .users import User
 from .active_message_handler import ActiveMessageHandler
