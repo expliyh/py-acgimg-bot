@@ -77,6 +77,10 @@ async def bot_admin(page: int = 1) -> BotAdmin:
     pixiv_configured = any(token.token for token in pixiv_tokens)
     pixiv_enabled = any(token.enable for token in pixiv_tokens)
 
+    cache_config = await config_registry.get_telegram_cache_config()
+    cache_backend_label = "内存" if cache_config.backend == "memory" else "Redis"
+    cache_redis = cache_config.redis_url or "未配置"
+
     lines = [
         "机器人配置面板",
         "",
@@ -94,6 +98,11 @@ async def bot_admin(page: int = 1) -> BotAdmin:
         f"- 配置数量: {len(pixiv_tokens)}",
         f"- 已启用: {pixiv_enabled and '是' or '否'}",
         f"- 可用: {pixiv_configured and '是' or '否'}",
+        "",
+        "Telegram 缓存:",
+        f"- 后端: {cache_backend_label}",
+        f"- TTL: {cache_config.ttl_seconds} 秒",
+        f"- Redis 地址: {cache_redis}",
     ]
 
     text = "\n".join(_md(line) for line in lines)
@@ -121,6 +130,12 @@ async def bot_admin(page: int = 1) -> BotAdmin:
             InlineKeyboardButton(
                 "配置 Pixiv API",
                 callback_data="conf:bot:pixiv:menu",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "缓存设置",
+                callback_data="conf:bot:cache:menu",
             )
         ],
         [InlineKeyboardButton("刷新", callback_data="conf:bot:panel:refresh")],

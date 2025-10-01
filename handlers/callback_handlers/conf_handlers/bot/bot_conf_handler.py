@@ -5,11 +5,13 @@ from .feature_flags import handle_feature_flag
 from .panel import refresh_bot_config_panel
 from .storage import handle_storage
 from .pixiv import handle_pixiv
+from .cache import handle_cache
 
 handler_map = {
     "feature": handle_feature_flag,
     "storage": handle_storage,
     "pixiv": handle_pixiv,
+    "cache": handle_cache,
 }
 
 

@@ -21,6 +21,7 @@ aiorwlock = "1.5.0"
 pillow = "11.1.0"
 pixivpy3 = "3.7.5"
 b2sdk = "2.8.0"
+redis = "5.2.1"
 
 [build-system]
 requires = ["poetry-core"]

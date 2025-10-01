@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from sqlalchemy import select
 
@@ -21,6 +22,13 @@ def _optional_str(value: str | bool | None) -> str | None:
 class Token:
     token: str
     enable: bool
+
+
+@dataclass(slots=True)
+class TelegramCacheConfig:
+    backend: Literal["memory", "redis"] = "memory"
+    ttl_seconds: int = 300
+    redis_url: str | None = None
 
 
 @dataclass
@@ -156,6 +164,56 @@ async def get_bot_tokens() -> list[Token]:
 async def get_pixiv_tokens() -> list[Token]:
     configs = await get_configs("pixiv_token")
     return [Token(token=i.value_str or "", enable=bool(i.value_bool)) for i in configs]
+
+
+def _normalize_cache_backend(value: str | bool | None) -> Literal["memory", "redis"]:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"memory", "redis"}:
+            return cast(Literal["memory", "redis"], normalized)
+    if value is True:
+        return "redis"
+    return "memory"
+
+
+def _coerce_positive_int(value: str | bool | None, *, default: int, minimum: int) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        numeric = int(str(value))
+    except (TypeError, ValueError):
+        return default
+    return max(numeric, minimum)
+
+
+async def get_telegram_cache_config() -> TelegramCacheConfig:
+    backend_value = await get_config("telegram_cache_backend")
+    ttl_value = await get_config("telegram_cache_ttl_seconds")
+    redis_url_value = await get_config("telegram_cache_redis_url")
+
+    backend = _normalize_cache_backend(backend_value)
+    ttl_seconds = _coerce_positive_int(ttl_value, default=300, minimum=30)
+    redis_url = _optional_str(redis_url_value)
+
+    return TelegramCacheConfig(backend=backend, ttl_seconds=ttl_seconds, redis_url=redis_url)
+
+
+async def set_telegram_cache_backend(backend: str) -> None:
+    normalized = _optional_str(backend)
+    if normalized not in {"memory", "redis"}:
+        raise ValueError("缓存后端必须为 'memory' 或 'redis'")
+    await update_config("telegram_cache_backend", normalized)
+
+
+async def set_telegram_cache_ttl(ttl_seconds: int) -> None:
+    if ttl_seconds < 30:
+        raise ValueError("缓存 TTL 必须至少为 30 秒")
+    await update_config("telegram_cache_ttl_seconds", str(ttl_seconds))
+
+
+async def set_telegram_cache_redis_url(url: str | None) -> None:
+    normalized = _optional_str(url)
+    await update_config("telegram_cache_redis_url", normalized or "")
 
 
 async def set_pixiv_token(token: str | None) -> None:
