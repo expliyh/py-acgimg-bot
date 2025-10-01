@@ -5,6 +5,7 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from handlers.callback_handlers.panel_utils import get_panel_command_message_id
 from registries import config_registry
 
 from .panel import refresh_bot_config_panel
@@ -56,8 +57,12 @@ async def handle_feature_flag(update: Update, context: ContextTypes.DEFAULT_TYPE
     label, enabled_text, disabled_text = _MUTABLE_FLAGS[key]
     await query.answer(f"{label} {enabled_text if new_value else disabled_text}")
 
+    panel_message_id = update.effective_message.message_id
+    command_message_id = get_panel_command_message_id(context, panel_message_id)
+
     await refresh_bot_config_panel(
         context,
         chat_id=update.effective_chat.id,
-        message_id=update.effective_message.message_id,
+        message_id=panel_message_id,
+        command_message_id=command_message_id,
     )

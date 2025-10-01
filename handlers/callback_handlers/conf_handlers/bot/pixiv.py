@@ -5,6 +5,7 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from handlers.callback_handlers.panel_utils import build_callback_data, get_panel_command_message_id
 from registries import active_message_handler_registry, config_registry
 from services import pixiv
 
@@ -30,7 +31,9 @@ def _mask_token_value(token: str) -> str:
     return f"{text[:3]}…{text[-4:]}"
 
 
-def _build_main_menu(tokens: list[config_registry.Token]) -> InlineKeyboardMarkup:
+def _build_main_menu(
+    tokens: list[config_registry.Token], *, command_message_id: int | None
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
     rows.append(
@@ -57,7 +60,7 @@ def _build_main_menu(tokens: list[config_registry.Token]) -> InlineKeyboardMarku
             [InlineKeyboardButton("清除全部", callback_data="conf:bot:pixiv:delete_all")]
         )
 
-    rows.append([InlineKeyboardButton("返回", callback_data="conf:bot:panel:refresh")])
+    rows.append([InlineKeyboardButton("返回", callback_data=build_callback_data("conf:bot:panel:refresh", command_message_id))])
     return InlineKeyboardMarkup(rows)
 
 
@@ -93,13 +96,14 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         return
 
     panel_message_id = message.message_id
+    command_message_id = get_panel_command_message_id(context, panel_message_id)
 
     if action == "menu":
         tokens = await config_registry.get_pixiv_tokens()
         await context.bot.edit_message_reply_markup(
             chat_id=chat.id,
             message_id=panel_message_id,
-            reply_markup=_build_main_menu(tokens),
+            reply_markup=_build_main_menu(tokens, command_message_id=command_message_id),
         )
         await query.answer("已打开 Pixiv 配置")
         return
@@ -165,9 +169,14 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         await context.bot.edit_message_reply_markup(
             chat_id=chat.id,
             message_id=panel_message_id,
-            reply_markup=_build_main_menu(updated_tokens),
+            reply_markup=_build_main_menu(updated_tokens, command_message_id=command_message_id),
         )
-        await refresh_bot_config_panel(context, chat_id=chat.id, message_id=panel_message_id)
+        await refresh_bot_config_panel(
+            context,
+            chat_id=chat.id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
+        )
         await query.answer("已更新 Token 状态")
         return
 
@@ -184,9 +193,14 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         await context.bot.edit_message_reply_markup(
             chat_id=chat.id,
             message_id=panel_message_id,
-            reply_markup=_build_main_menu(updated_tokens),
+            reply_markup=_build_main_menu(updated_tokens, command_message_id=command_message_id),
         )
-        await refresh_bot_config_panel(context, chat_id=chat.id, message_id=panel_message_id)
+        await refresh_bot_config_panel(
+            context,
+            chat_id=chat.id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
+        )
         await query.answer("已删除 Token")
         return
 
@@ -197,9 +211,14 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         await context.bot.edit_message_reply_markup(
             chat_id=chat.id,
             message_id=panel_message_id,
-            reply_markup=_build_main_menu(updated_tokens),
+            reply_markup=_build_main_menu(updated_tokens, command_message_id=command_message_id),
         )
-        await refresh_bot_config_panel(context, chat_id=chat.id, message_id=panel_message_id)
+        await refresh_bot_config_panel(
+            context,
+            chat_id=chat.id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
+        )
         await query.answer("已启用全部 Token")
         return
 
@@ -210,9 +229,14 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         await context.bot.edit_message_reply_markup(
             chat_id=chat.id,
             message_id=panel_message_id,
-            reply_markup=_build_main_menu(updated_tokens),
+            reply_markup=_build_main_menu(updated_tokens, command_message_id=command_message_id),
         )
-        await refresh_bot_config_panel(context, chat_id=chat.id, message_id=panel_message_id)
+        await refresh_bot_config_panel(
+            context,
+            chat_id=chat.id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
+        )
         await query.answer("已禁用全部 Token")
         return
 
@@ -223,9 +247,14 @@ async def handle_pixiv(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: 
         await context.bot.edit_message_reply_markup(
             chat_id=chat.id,
             message_id=panel_message_id,
-            reply_markup=_build_main_menu(updated_tokens),
+            reply_markup=_build_main_menu(updated_tokens, command_message_id=command_message_id),
         )
-        await refresh_bot_config_panel(context, chat_id=chat.id, message_id=panel_message_id)
+        await refresh_bot_config_panel(
+            context,
+            chat_id=chat.id,
+            message_id=panel_message_id,
+            command_message_id=command_message_id,
+        )
         await query.answer("已清除全部 Token")
         return
 

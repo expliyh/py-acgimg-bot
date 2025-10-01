@@ -7,6 +7,7 @@ from telegram.constants import ParseMode
 import messase_generator
 from utils import is_group_type, delete_messages
 from registries import user_registry, group_registry, engine
+from handlers.callback_handlers.panel_utils import register_panel
 from services.command_history import command_logger
 from handlers.registry import bot_handler
 
@@ -35,7 +36,9 @@ async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE)
             delay=10
         ))
         return
-    config = await messase_generator.bot_admin(page=1)
+    command_message = update.effective_message
+    command_message_id = getattr(command_message, "message_id", None)
+    config = await messase_generator.bot_admin(page=1, command_message_id=command_message_id)
 
     message: Message = await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -43,5 +46,7 @@ async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=InlineKeyboardMarkup(config.keyboard),
         parse_mode=ParseMode.MARKDOWN_V2
     )
+
+    register_panel(context, message.message_id, command_message_id)
     return
 

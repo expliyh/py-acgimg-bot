@@ -45,6 +45,12 @@ def _storage_label(current: str | None) -> str:
     return mapping.get(current.lower(), current)
 
 
+
+
+def _build_callback(base: str, command_message_id: int | None) -> str:
+    if command_message_id is None:
+        return base
+    return f"{base}:{command_message_id}"
 def _backblaze_ready(config) -> bool:
     return bool(config.app_id and config.app_key and config.bucket_name)
 
@@ -61,7 +67,7 @@ def _md(line: str) -> str:
     return escape_markdown(line, version=2)
 
 
-async def bot_admin(page: int = 1) -> BotAdmin:
+async def bot_admin(page: int = 1, *, command_message_id: int | None = None) -> BotAdmin:
     allow_r18g = _is_truthy(await config_registry.get_config("allow_r18g"))
     enable_on_new_group = _is_truthy(await config_registry.get_config("enable_on_new_group"))
 
@@ -138,7 +144,10 @@ async def bot_admin(page: int = 1) -> BotAdmin:
                 callback_data="conf:bot:cache:menu",
             )
         ],
-        [InlineKeyboardButton("刷新", callback_data="conf:bot:panel:refresh")],
+        [
+            InlineKeyboardButton("刷新", callback_data=_build_callback("conf:bot:panel:refresh", command_message_id)),
+            InlineKeyboardButton("关闭", callback_data=_build_callback("conf:bot:panel:close", command_message_id)),
+        ],
     ]
 
     return BotAdmin(text=text, keyboard=keyboard)
