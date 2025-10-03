@@ -32,11 +32,8 @@ async def download_file(filename: str, url: str, replace: bool = False):
                                     await f.write(await response.content.read())
                                 return
                             else:
-                                raise aiohttp.HttpProcessingError(
-                                    message=f"Error {response.status} while downloading file.",
-                                    code=response.status,
-                                )
-                except (aiohttp.ClientError, aiohttp.HttpProcessingError) as e:
+                                response.raise_for_status()
+                except aiohttp.ClientError as e:
                     print(f"Attempt {attempt} failed: {e}")
                     attempt += 1
                     if attempt >= retries:
