@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 import os
 import random
 
@@ -8,9 +11,20 @@ from services import file_service
 from exps import BadRequestError
 
 
+@dataclass(slots=True)
+class ImageResource:
+    illustration: Illustration
+    page_id: int
+    filename: str
+    image_bytes: bytes
+    file_id: str | None
+    link: str
+    is_original: bool
+
+
 def _resolve_page_id(illust: Illustration, page_id: int | None, allow_random: bool) -> int:
     if illust.page_count is None or illust.page_count <= 0:
-        raise FileNotFoundError("该作品没有可用的图片页")
+        raise FileNotFoundError("该作品没有可用的图片")
     if page_id is None:
         if allow_random:
             return random.randrange(illust.page_count)
@@ -65,13 +79,37 @@ def _resolve_extension(illust: Illustration, page_id: int, link: str) -> str:
     return ext
 
 
+def _resolve_file_id(illust: Illustration, page_id: int, *, origin: bool) -> str | None:
+    container = getattr(illust, "original_file_ids" if origin else "compressed_file_ids", None)
+    if isinstance(container, list):
+        if page_id < len(container):
+            value = container[page_id]
+            if isinstance(value, str):
+                cleaned = value.strip()
+                return cleaned or None
+        return None
+    if isinstance(container, (tuple, set)):
+        try:
+            value = list(container)[page_id]
+        except (IndexError, TypeError):
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return None
+    if isinstance(container, str):
+        cleaned = container.strip()
+        return cleaned or None
+    return None
+
+
 async def get_image(
     pixiv_id: int | None = None,
     page_id: int | None = None,
     origin: bool = False,
     sanity_limit: int = 5,
     allow_r18g: bool = False,
-) -> tuple[Illustration, bytes, int, str]:
+) -> ImageResource:
     if pixiv_id is not None:
         illust = await registries.get_illust_info(pixiv_id)
         if illust is None:
@@ -84,7 +122,16 @@ async def get_image(
         image = await fetcher(filename=filename, url=link)
         if image is None:
             raise FileNotFoundError("未能获取到图片文件")
-        return illust, image, resolved_page_id, filename
+        file_id = _resolve_file_id(illust, resolved_page_id, origin=origin)
+        return ImageResource(
+            illustration=illust,
+            page_id=resolved_page_id,
+            filename=filename,
+            image_bytes=image,
+            file_id=file_id,
+            link=link,
+            is_original=origin,
+        )
 
     if origin:
         raise BadRequestError("随机图片不可请求原图")
@@ -101,4 +148,14 @@ async def get_image(
     if image is None:
         raise FileNotFoundError("未能获取到图片文件")
 
-    return illust, image, resolved_page_id, filename
+    file_id = _resolve_file_id(illust, resolved_page_id, origin=False)
+
+    return ImageResource(
+        illustration=illust,
+        page_id=resolved_page_id,
+        filename=filename,
+        image_bytes=image,
+        file_id=file_id,
+        link=link,
+        is_original=False,
+    )

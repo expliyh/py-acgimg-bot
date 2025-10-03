@@ -1,3 +1,3 @@
-from .get_image import get_image
+from .get_image import ImageResource, get_image
 
-__all__ = ["get_image"]
+__all__ = ["get_image", "ImageResource"]
