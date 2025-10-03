@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import aiofiles
+from registries import config_registry
 
 from . import file_lock
 from .download_file import download_file
@@ -15,6 +16,34 @@ from PIL import Image
 
 CACHE_ROOT = Path(file_path).expanduser()
 CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+_LOCAL_STORAGE_ROOT: Path | None = None
+
+
+async def _get_local_storage_root() -> Path | None:
+    global _LOCAL_STORAGE_ROOT
+    if _LOCAL_STORAGE_ROOT is not None:
+        return _LOCAL_STORAGE_ROOT
+    try:
+        config = await config_registry.get_local_storage_config()
+    except Exception:
+        return None
+    root_value = config.root_path or "storage"
+    root_path = Path(root_value).expanduser()
+    if not root_path.is_absolute():
+        root_path = (Path.cwd() / root_path).resolve()
+    else:
+        root_path = root_path.resolve()
+    _LOCAL_STORAGE_ROOT = root_path
+    return _LOCAL_STORAGE_ROOT
+
+
+async def _resolve_local_path(path: Path) -> Path:
+    root = await _get_local_storage_root()
+    if root is None:
+        return path.resolve()
+    return (root / path).resolve()
 
 
 async def _copy_local_file(source: Path, destination: Path) -> None:
@@ -48,6 +77,8 @@ async def _ensure_cached_file(filename: str, url: str | None) -> Path:
 
     source_path = Path(parsed.path if parsed.scheme == "file" else url).expanduser()
     if not source_path.is_absolute():
+        source_path = await _resolve_local_path(source_path)
+    else:
         source_path = source_path.resolve()
     if not source_path.exists():
         raise FileNotFoundError(f"源文件不存在: {source_path}")

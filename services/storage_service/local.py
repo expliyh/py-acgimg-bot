@@ -36,10 +36,10 @@ class LocalStorage(Storage):
         async with aiofiles.open(destination_path, "wb") as fp:
             await fp.write(file)
 
+        relative_path = destination_path.relative_to(self.root_path).as_posix()
         if self.base_url:
-            relative_path = destination_path.relative_to(self.root_path).as_posix()
             return f"{self.base_url.rstrip('/')}/{relative_path}"
-        return str(destination_path)
+        return relative_path
 
 
 local_storage = LocalStorage()
