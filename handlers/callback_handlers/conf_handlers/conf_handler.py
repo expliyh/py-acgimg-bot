@@ -2,11 +2,17 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from handlers.callback_handlers.conf_handlers.bot.bot_conf_handler import bot_conf_handler_func
-from handlers.callback_handlers.conf_handlers.user_conf_handlers import user_conf_handler_func
+from handlers.callback_handlers.conf_handlers.group_conf_handlers import (
+    group_conf_handler_func,
+)
+from handlers.callback_handlers.conf_handlers.user_conf_handlers import (
+    user_conf_handler_func,
+)
 
 handler_map = {
     "user": user_conf_handler_func,
     "bot": bot_conf_handler_func,
+    "group": group_conf_handler_func,
 }
 
 
