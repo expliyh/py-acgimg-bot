@@ -40,3 +40,12 @@ async def random_illust(sanity_limit: int = 5, r18g: bool = False):
 
         result = await session.execute(stmt)
         return result.scalars().first()
+
+
+async def save_illustration(illust: Illustration) -> Illustration:
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        merged = await session.merge(illust)
+        await session.commit()
+        await session.refresh(merged)
+        return merged
