@@ -21,9 +21,13 @@ async def option_handler_func(update: Update, context) -> None:
     """
     is_group = is_group_type(update.effective_chat.type)
     user = await user_registry.get_user_by_id(update.effective_user.id)
+    command_message = update.effective_message
+    command_message_id = getattr(command_message, "message_id", None)
+
     if is_group:
         group = await group_registry.get_group_by_id(update.effective_chat.id)
-        if user not in group.admin_ids:
+        admin_ids = set(group.admin_ids or [])
+        if admin_ids and user.id not in admin_ids:
             # 回复命令提示没有权限并定时删除回复和命令
             message: Message = await context.bot.send_message(
                 chat_id=update.effective_chat.id,
@@ -37,9 +41,20 @@ async def option_handler_func(update: Update, context) -> None:
                 delay=10
             ))
             return
+        config = await messase_generator.config_group(
+            group=group,
+            command_message_id=command_message_id,
+        )
+
+        message: Message = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=config.text,
+            reply_markup=InlineKeyboardMarkup(config.keyboard)
+        )
+
+        register_panel(context, message.message_id, command_message_id)
         return
-    command_message = update.effective_message
-    command_message_id = getattr(command_message, "message_id", None)
+
     config = await messase_generator.config_user(page=1, user=user, command_message_id=command_message_id)
 
     message: Message = await context.bot.send_message(
