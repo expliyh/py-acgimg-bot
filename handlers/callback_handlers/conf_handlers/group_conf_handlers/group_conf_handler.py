@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 from handlers.callback_handlers.panel_utils import close_panel
 from registries import group_registry
+from services.telegram_cache import get_cached_admin_ids
 
 from .chat_placeholder import handle_chat_placeholder
 from .enable import handle_enable_toggle
@@ -66,8 +67,18 @@ async def group_conf_handler_func(
 
     group = await group_registry.get_group_by_id(group_id)
     admin_ids = set(group.admin_ids or [])
-    user_id = update.effective_user.id
-    if admin_ids and user_id not in admin_ids:
+    if not admin_ids:
+        fetched_admin_ids = await get_cached_admin_ids(context, chat.id)
+        if fetched_admin_ids:
+            admin_ids = set(fetched_admin_ids)
+
+    user = update.effective_user
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        await query.answer("无法识别的用户", show_alert=True)
+        return
+
+    if not admin_ids or user_id not in admin_ids:
         await query.answer("只有群组管理员可以执行此操作", show_alert=True)
         return
 

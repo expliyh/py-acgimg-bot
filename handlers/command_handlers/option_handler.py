@@ -8,6 +8,7 @@ from registries import user_registry, group_registry, engine
 from handlers.callback_handlers.panel_utils import register_panel
 from services.command_history import command_logger
 from handlers.registry import bot_handler
+from services.telegram_cache import get_cached_admin_ids
 
 
 @bot_handler
@@ -25,17 +26,23 @@ async def option_handler_func(update: Update, context) -> None:
     command_message_id = getattr(command_message, "message_id", None)
 
     if is_group:
-        group = await group_registry.get_group_by_id(update.effective_chat.id)
+        chat_id = update.effective_chat.id
+        group = await group_registry.get_group_by_id(chat_id)
         admin_ids = set(group.admin_ids or [])
-        if admin_ids and user.id not in admin_ids:
+        if not admin_ids:
+            fetched_admin_ids = await get_cached_admin_ids(context, chat_id)
+            if fetched_admin_ids:
+                admin_ids = set(fetched_admin_ids)
+
+        if not admin_ids or user.id not in admin_ids:
             # 回复命令提示没有权限并定时删除回复和命令
             message: Message = await context.bot.send_message(
-                chat_id=update.effective_chat.id,
+                chat_id=chat_id,
                 text="您没有权限使用此命令 (该提示和命令将在 10 秒后自动删除)",
                 reply_to_message_id=update.effective_message.id
             )
             await asyncio.create_task(delete_messages(
-                chat_id=update.effective_chat.id,
+                chat_id=chat_id,
                 message_ids=[update.effective_message.id, message.message_id],
                 context=context,
                 delay=10
