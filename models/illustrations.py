@@ -1,4 +1,5 @@
 import os
+from collections.abc import Iterable
 
 from sqlalchemy import Column, Integer, String, Boolean, Enum, JSON, Text
 
@@ -45,16 +46,35 @@ class Illustration(Base):
 
 
 def build_illust_from_api_dict(api_dict: dict) -> Illustration:
+    raw_tags = api_dict.get('tags', [])
+    tags: list[str] = []
+    if isinstance(raw_tags, str):
+        cleaned = raw_tags.strip()
+        if cleaned:
+            tags.append(cleaned)
+    elif isinstance(raw_tags, Iterable):
+        for tag in raw_tags:
+            if isinstance(tag, dict):
+                name = tag.get('name')
+                if name:
+                    tags.append(str(name))
+            elif isinstance(tag, str):
+                cleaned = tag.strip()
+                if cleaned:
+                    tags.append(cleaned)
+
+    page_count = int(api_dict['page_count'])
+
     illust = Illustration(
         id=str(api_dict['id']),
         title=api_dict['title'],
         author_id=str(api_dict['user']['id']),
         author_name=api_dict['user']['name'],
-        page_count=api_dict['page_count'],
+        page_count=page_count,
         sanity_level=int(api_dict['sanity_level']),
         r18g=int(api_dict['x_restrict']) >= 2,
         x_restrict=api_dict['x_restrict'],
-        tags=api_dict['tags'],
+        tags=tags,
         caption=api_dict['caption'],
         is_ai=int(api_dict['illust_ai_type']) == 2,
         file_urls=[],
@@ -63,11 +83,34 @@ def build_illust_from_api_dict(api_dict: dict) -> Illustration:
         origin_urls=[],
         file_ext=[]
     )
+    origin_urls: list[str] = []
+    file_exts: list[str] = []
+
+    def _append(origin_url: str | None) -> None:
+        if not origin_url:
+            raise RuntimeError("Pixiv API 响应缺少原图链接")
+        origin_urls.append(origin_url)
+        ext = os.path.splitext(origin_url)[1] or ".jpg"
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        file_exts.append(ext)
+
     if illust.page_count == 1:
-        illust.origin_urls = [api_dict['meta_single_page']['original_image_url']]
-        illust.file_ext = os.path.splitext(api_dict['meta_single_page']['original_image_url'])[1]
+        single_page = api_dict.get('meta_single_page', {})
+        _append(single_page.get('original_image_url'))
     else:
-        for i in range(illust.page_count):
-            illust.origin_urls.append(api_dict['meta_pages'][i]['image_urls']['original'])
-            illust.file_ext = os.path.splitext(api_dict['meta_pages'][i]['image_urls']['original'])[1]
+        meta_pages: Iterable[dict] = api_dict.get('meta_pages', [])
+        for page in meta_pages:
+            image_urls = page.get('image_urls') if isinstance(page, dict) else None
+            origin_url = image_urls.get('original') if isinstance(image_urls, dict) else None
+            _append(origin_url)
+
+    if len(origin_urls) != illust.page_count:
+        raise RuntimeError("插画页数与返回的原图数量不一致")
+
+    illust.origin_urls = origin_urls
+    illust.file_ext = file_exts
+    illust.file_urls = [None] * illust.page_count
+    illust.compressed_file_ids = [None] * illust.page_count
+    illust.original_file_ids = [None] * illust.page_count
     return illust

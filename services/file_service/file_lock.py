@@ -10,12 +10,14 @@ def get_dick_lock() -> aiorwlock.RWLock:
 
 
 def get_lock(lock_name: str) -> tuple[aiorwlock.RWLock, asyncio.Lock]:
-    if lock_name in file_locks:
-        return file_locks[lock_name]
-    else:
+    """Return a tuple containing the global dict lock and a per-file lock."""
+
+    lock = file_locks.get(lock_name)
+    if lock is None:
         lock = asyncio.Lock()
         file_locks[lock_name] = lock
-        return dict_lock, lock
+
+    return dict_lock, lock
 
 
 def del_lock(lock_name: str) -> None:

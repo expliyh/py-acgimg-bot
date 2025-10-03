@@ -25,18 +25,17 @@ async def download_file(filename: str, url: str, replace: bool = False):
                     # 创建一个 ClientTimeout 对象
                     timeout_settings = aiohttp.ClientTimeout(total=10)
                     async with aiohttp.ClientSession(timeout=timeout_settings) as session:
-                        async with session.get(url) as response:
+                        # Pixiv 的资源接口需要带 Referer 头，否则会返回 403。
+                        headers = {"Referer": "https://app-api.pixiv.net/"}
+                        async with session.get(url, headers=headers) as response:
                             if response.status == 200:
                                 # 打开文件准备写入
                                 async with aiofiles.open(file_url, 'wb') as f:
                                     await f.write(await response.content.read())
                                 return
                             else:
-                                raise aiohttp.HttpProcessingError(
-                                    message=f"Error {response.status} while downloading file.",
-                                    code=response.status,
-                                )
-                except (aiohttp.ClientError, aiohttp.HttpProcessingError) as e:
+                                response.raise_for_status()
+                except aiohttp.ClientError as e:
                     print(f"Attempt {attempt} failed: {e}")
                     attempt += 1
                     if attempt >= retries:

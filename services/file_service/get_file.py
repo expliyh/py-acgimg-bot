@@ -1,12 +1,65 @@
-import os.path
+from __future__ import annotations
 
-from aiofiles import open
+import os
+from pathlib import Path
+from urllib.parse import urlparse
+
+import aiofiles
 
 from . import file_lock
 from .download_file import download_file
 from .conf import file_path
 
 from PIL import Image
+
+
+CACHE_ROOT = Path(file_path).expanduser()
+CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+async def _copy_local_file(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(source, 'rb') as src, aiofiles.open(destination, 'wb') as dst:
+        while True:
+            chunk = await src.read(64 * 1024)
+            if not chunk:
+                break
+            await dst.write(chunk)
+
+
+async def _ensure_cached_file(filename: str, url: str | None) -> Path:
+    cache_path = CACHE_ROOT / filename
+    if cache_path.exists():
+        return cache_path
+
+    if url is None:
+        raise FileNotFoundError("没有可用的文件来源")
+
+    parsed = urlparse(url)
+    if parsed.scheme in {"http", "https"}:
+        try:
+            await download_file(filename, url)
+        except FileExistsError:
+            pass
+        return cache_path
+
+    if parsed.scheme not in {"", "file"}:
+        raise ValueError(f"不支持的文件来源协议: {parsed.scheme}")
+
+    source_path = Path(parsed.path if parsed.scheme == "file" else url).expanduser()
+    if not source_path.is_absolute():
+        source_path = source_path.resolve()
+    if not source_path.exists():
+        raise FileNotFoundError(f"源文件不存在: {source_path}")
+
+    dict_lock, lock = file_lock.get_lock(filename)
+    async with dict_lock.reader_lock:
+        async with lock:
+            if cache_path.exists():
+                return cache_path
+            await _copy_local_file(source_path, cache_path)
+
+    return cache_path
 
 
 def compress_image(infile, target_size_mb=10, step=5, quality=95) -> str:
@@ -47,25 +100,21 @@ def compress_image(infile, target_size_mb=10, step=5, quality=95) -> str:
 
 
 async def get_image(filename: str, url: str = None) -> bytes | None:
-    file_url = file_path + filename
-    if not os.path.exists(file_url):
-        await download_file(filename, url)
-    if os.path.getsize(file_url) > 10000000:
-        file_url = compress_image(file_url)
+    cache_path = await _ensure_cached_file(filename, url)
     dict_lock, lock = file_lock.get_lock(filename)
     async with dict_lock.reader_lock:
         async with lock:
-            async with open(file_url, 'rb') as f:
+            path_to_read = cache_path
+            if path_to_read.exists() and path_to_read.stat().st_size > 10_000_000:
+                path_to_read = Path(compress_image(str(path_to_read)))
+            async with aiofiles.open(path_to_read, 'rb') as f:
                 return await f.read()
 
 
 async def get_file(filename: str, url: str = None) -> bytes | None:
-    file_url = file_path + filename
-    if not os.path.exists(file_url):
-        await download_file(filename, url)
-        # return None
+    cache_path = await _ensure_cached_file(filename, url)
     dict_lock, lock = file_lock.get_lock(filename)
     async with dict_lock.reader_lock:
         async with lock:
-            async with open(file_url, 'rb') as f:
+            async with aiofiles.open(cache_path, 'rb') as f:
                 return await f.read()
