@@ -4,43 +4,13 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from registries import config_registry
+from services.permissions import has_super_user_access
 from services import pixiv
 from services.command_history import command_logger
 from services.illustration_importer import import_illustration
 from handlers.registry import bot_handler
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_super_user_ids(value: str | bool | None) -> set[int]:
-    if value in (None, False):
-        return set()
-    if value is True:
-        return set()
-    text = str(value)
-    for ch in "\n\t\r":
-        text = text.replace(ch, " ")
-    tokens = [token.strip() for token in text.replace(",", " ").split(" ")]
-    ids: set[int] = set()
-    for token in tokens:
-        if not token:
-            continue
-        try:
-            ids.add(int(token))
-        except ValueError:
-            logger.debug("Skip invalid super user id token: %s", token)
-    return ids
-
-
-async def _require_super_user(user_id: int | None) -> bool:
-    config_value = await config_registry.get_config("super_user")
-    allowed = _parse_super_user_ids(config_value)
-    if not allowed:
-        return True
-    if user_id is None:
-        return False
-    return user_id in allowed
 
 
 def _build_chat_candidates(update: Update) -> list[int]:
@@ -83,7 +53,7 @@ async def add_pixiv_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     user_id = update.effective_user.id if update.effective_user else None
-    if not await _require_super_user(user_id):
+    if not await has_super_user_access(user_id):
         await update.effective_message.reply_text("您没有权限使用此命令。")
         return
 
