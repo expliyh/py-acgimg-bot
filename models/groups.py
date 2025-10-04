@@ -8,7 +8,7 @@ from .base import Base
 
 class Group(Base):
     __tablename__ = f"{file_config.db_prefix}groups"
-    id = Column(BigInteger, primary_key=True, comment='群组的 ID')
+    id = Column(BigInteger, primary_key=True, autoincrement=False, comment='群组的 ID')
     status = Column(Enum(GroupStatus), default=GroupStatus.ENABLED, nullable=False, comment='群组状态')
     enable = Column(Boolean, default=True, nullable=False, comment='是否启用此群组')
     name = Column(String(64), nullable=True, comment='群组的名称')

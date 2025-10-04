@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -93,67 +93,129 @@ async def _expand_telegram_ids(conn: AsyncConnection) -> None:
     prefix = file_config.db_prefix
 
     targets = (
-        ("groups", "id"),
-        ("users", "id"),
-        ("command_history", "user_id"),
-        ("command_history", "chat_id"),
-        ("command_history", "message_id"),
-        ("group_chat_history", "message_id"),
-        ("group_chat_history", "group_id"),
-        ("group_chat_history", "user_id"),
-        ("private_chat_history", "message_id"),
-        ("private_chat_history", "user_id"),
-        ("active_message_handler", "group_id"),
-        ("active_message_handler", "user_id"),
+        ("groups", "id", False),
+        ("users", "id", False),
+        ("command_history", "user_id", True),
+        ("command_history", "chat_id", True),
+        ("command_history", "message_id", True),
+        ("group_chat_history", "message_id", True),
+        ("group_chat_history", "group_id", True),
+        ("group_chat_history", "user_id", True),
+        ("private_chat_history", "message_id", True),
+        ("private_chat_history", "user_id", True),
+        ("active_message_handler", "group_id", True),
+        ("active_message_handler", "user_id", True),
     )
 
-    for table_suffix, column in targets:
+    for table_suffix, column, allow_autoincrement in targets:
         table_name = f"{prefix}{table_suffix}"
-        column_info = await conn.execute(
-            text(
-                """
-                SELECT DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, EXTRA
-                FROM information_schema.COLUMNS
-                WHERE TABLE_SCHEMA = :schema
-                  AND TABLE_NAME = :table
-                  AND COLUMN_NAME = :column
-                """
-            ),
-            {"schema": schema, "table": table_name, "column": column},
+        await _ensure_column_bigint(
+            conn,
+            schema,
+            table_name,
+            column,
+            allow_autoincrement=allow_autoincrement,
         )
-        row = column_info.mappings().first()
-        if row is None:
-            logger.debug(
-                "Column %s.%s not found while migrating; skipping",
-                table_name,
-                column,
-            )
-            continue
 
-        data_type = (row["DATA_TYPE"] or "").lower()
-        if data_type == "bigint":
-            continue
 
-        null_clause = "NULL" if row["IS_NULLABLE"] == "YES" else "NOT NULL"
-        default_clause = _build_default_clause(row["COLUMN_DEFAULT"])
-        comment_clause = _build_comment_clause(row["COLUMN_COMMENT"])
-        extra_clause = f" {row['EXTRA'].upper()}" if row["EXTRA"] else ""
+async def _remove_auto_increment_flags(conn: AsyncConnection) -> None:
+    schema = file_config.db_name
+    prefix = file_config.db_prefix
 
-        sql = (
-            f"ALTER TABLE {_quote(table_name)} "
-            f"MODIFY COLUMN {_quote(column)} BIGINT "
-            f"{null_clause}{default_clause}{comment_clause}{extra_clause}"
+    for table_suffix in ("groups", "users"):
+        table_name = f"{prefix}{table_suffix}"
+        await _ensure_column_bigint(
+            conn,
+            schema,
+            table_name,
+            "id",
+            allow_autoincrement=False,
         )
-        await conn.execute(text(sql))
-        logger.info("Converted %s.%s to BIGINT", table_name, column)
 
 
-def _build_default_clause(default_value: str | None) -> str:
+async def _ensure_column_bigint(
+    conn: AsyncConnection,
+    schema: str,
+    table_name: str,
+    column: str,
+    *,
+    allow_autoincrement: bool,
+) -> None:
+    column_info = await conn.execute(
+        text(
+            """
+            SELECT DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, EXTRA
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = :schema
+              AND TABLE_NAME = :table
+              AND COLUMN_NAME = :column
+            """
+        ),
+        {"schema": schema, "table": table_name, "column": column},
+    )
+    row = column_info.mappings().first()
+    if row is None:
+        logger.debug(
+            "Column %s.%s not found while migrating; skipping",
+            table_name,
+            column,
+        )
+        return
+
+    data_type = (row["DATA_TYPE"] or "").lower()
+    extra = (row["EXTRA"] or "").lower()
+
+    needs_type_change = data_type != "bigint"
+    needs_auto_increment_change = (
+        not allow_autoincrement and "auto_increment" in extra
+    )
+
+    if not needs_type_change and not needs_auto_increment_change:
+        return
+
+    null_clause = "NULL" if row["IS_NULLABLE"] == "YES" else "NOT NULL"
+    default_clause = _build_default_clause(row["COLUMN_DEFAULT"])
+    comment_clause = _build_comment_clause(row["COLUMN_COMMENT"])
+
+    extra_clause = ""
+    if allow_autoincrement and extra:
+        extra_clause = f" {extra.upper()}"
+
+    sql = (
+        f"ALTER TABLE {_quote(table_name)} "
+        f"MODIFY COLUMN {_quote(column)} BIGINT "
+        f"{null_clause}{default_clause}{comment_clause}{extra_clause}"
+    )
+    await conn.execute(text(sql))
+
+    detail_message = []
+    if needs_type_change:
+        detail_message.append("type")
+    if needs_auto_increment_change:
+        detail_message.append("AUTO_INCREMENT flag")
+
+    logger.info(
+        "Adjusted %s.%s (%s)",
+        table_name,
+        column,
+        " and ".join(detail_message),
+    )
+
+
+def _build_default_clause(default_value) -> str:
     if default_value is None:
         return ""
-    if default_value.upper() == "NULL":
-        return " DEFAULT NULL"
-    return f" DEFAULT '{default_value.replace("'", "''")}'"
+
+    if isinstance(default_value, bytes):
+        default_value = default_value.decode()
+
+    if isinstance(default_value, str):
+        if default_value.upper() == "NULL":
+            return " DEFAULT NULL"
+        escaped = default_value.replace("'", "''")
+        return f" DEFAULT '{escaped}'"
+
+    return f" DEFAULT {default_value}"
 
 
 def _build_comment_clause(comment: str | None) -> str:
@@ -167,5 +229,10 @@ _MIGRATIONS: tuple[Migration, ...] = (
         version=1,
         name="Expand Telegram ID columns to BIGINT",
         handler=_expand_telegram_ids,
+    ),
+    Migration(
+        version=2,
+        name="Remove AUTO_INCREMENT from Telegram ID columns",
+        handler=_remove_auto_increment_flags,
     ),
 )
