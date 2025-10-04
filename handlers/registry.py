@@ -7,7 +7,10 @@ from telegram.ext import BaseHandler, CommandHandler
 
 Callback = TypeVar("Callback", bound=Callable[..., Awaitable[object]])
 
+MessageCallback = Callable[..., Awaitable[object]]
+
 _registered_handlers: list[BaseHandler] = []
+_registered_message_handlers: dict[str, MessageCallback] = {}
 
 
 @overload
@@ -51,6 +54,42 @@ def bot_handler(
     if func is not None:
         return register(func)
     return register
+
+
+
+@overload
+def message_handler(func: MessageCallback) -> MessageCallback:
+    ...
+
+
+@overload
+def message_handler(*, name: str | None = None) -> Callable[[MessageCallback], MessageCallback]:
+    ...
+
+
+def message_handler(
+    func: MessageCallback | None = None,
+    *,
+    name: str | None = None,
+) -> MessageCallback | Callable[[MessageCallback], MessageCallback]:
+    """Register a message handler callback via decorator usage."""
+
+    def register(callback: MessageCallback) -> MessageCallback:
+        handler_name = name or getattr(callback, "__message_handler_name__", None) or callback.__name__
+        if not handler_name:
+            raise ValueError("Message handler name could not be determined")
+        _registered_message_handlers[handler_name] = callback
+        return callback
+
+    if func is not None:
+        return register(func)
+    return register
+
+
+def iter_message_handlers() -> dict[str, MessageCallback]:
+    """Return a snapshot of all registered message handler callbacks keyed by name."""
+
+    return dict(_registered_message_handlers)
 
 
 def iter_bot_handlers() -> list[BaseHandler]:

@@ -11,6 +11,7 @@ from registries import active_message_handler_registry, config_registry
 from services import pixiv
 
 from handlers.callback_handlers.conf_handlers.bot.panel import refresh_bot_config_panel
+from handlers.registry import message_handler
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ async def _reload_pixiv_state() -> None:
         await pixiv.token_refresh(force=True)
 
 
+@message_handler
 async def set_pixiv_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

@@ -12,12 +12,14 @@ from registries import active_message_handler_registry, user_registry
 from handlers.callback_handlers.conf_handlers.user_conf_handlers.panel import (
     refresh_user_config_panel,
 )
+from handlers.registry import message_handler
 
 logger = logging.getLogger(__name__)
 
 _HANDLER_PREFIX = "set_user_nickname"
 
 
+@message_handler
 async def set_user_nickname(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

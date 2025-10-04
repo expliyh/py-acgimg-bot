@@ -38,34 +38,37 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Tasks to run during application startup
-    await engine.create_all()
-    await schema_migrator.ensure_schema_migrations(engine.engine)
-    await storage_service.ensure_storage_config_defaults()
-    storage = await storage_service.use()
-    if storage is None:
-        logger.warning("No storage service set")
-    else:
-        await storage.get_config()
-    await tg_bot.config()
-    await pixiv.read_token_from_config()
-    if pixiv.enabled:
-        await pixiv.token_refresh()
-    else:
-        logger.warning("Pixiv features disabled due to missing token")
-
-    # Initialize database configuration defaults
     try:
-        await init_database_config(db_config_declare)
-        logger.info("Database configurations initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database configurations: {e}")
+        # Tasks to run during application startup
+        await engine.create_all()
+        await schema_migrator.ensure_schema_migrations(engine.engine)
+        await storage_service.ensure_storage_config_defaults()
+        storage = await storage_service.use()
+        if storage is None:
+            logger.warning("No storage service set")
+        else:
+            await storage.get_config()
+        await tg_bot.config()
+        await pixiv.read_token_from_config()
+        if pixiv.enabled:
+            await pixiv.token_refresh()
+        else:
+            logger.warning("Pixiv features disabled due to missing token")
 
-    logger.warning("Bot started")
-    yield
+        # Initialize database configuration defaults
+        try:
+            await init_database_config(db_config_declare)
+            logger.info("Database configurations initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize database configurations: {e}")
 
-    # Tasks to run during application shutdown
-    pass
+        logger.warning("Bot started")
+        yield
+    finally:
+        try:
+            await tg_bot.shutdown()
+        except Exception:
+            logger.exception("Error while shutting down Telegram bot")
 
 
 app = FastAPI(lifespan=lifespan)

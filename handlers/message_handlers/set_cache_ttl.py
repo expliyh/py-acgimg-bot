@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 from handlers.callback_handlers.conf_handlers.bot.panel import refresh_bot_config_panel
 from registries import active_message_handler_registry, config_registry
 from services.telegram_cache import telegram_cache_manager
+from handlers.registry import message_handler
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ _HANDLER_PREFIX = "set_cache_ttl"
 _MIN_TTL = 30
 
 
+@message_handler
 async def set_cache_ttl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

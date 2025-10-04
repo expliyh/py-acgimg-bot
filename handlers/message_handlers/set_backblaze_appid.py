@@ -2,8 +2,10 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from registries import config_registry, active_message_handler_registry
+from handlers.registry import message_handler
 
 
+@message_handler
 async def set_backblaze_appid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message.text
     await active_message_handler_registry.delete(

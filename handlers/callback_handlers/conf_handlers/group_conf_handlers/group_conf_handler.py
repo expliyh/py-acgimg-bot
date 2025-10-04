@@ -1,4 +1,4 @@
-"""Entry point for group configuration callback handling."""
+﻿"""Entry point for group configuration callback handling."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from services.telegram_cache import get_cached_admin_ids
 
 from .chat_placeholder import handle_chat_placeholder
 from .enable import handle_enable_toggle
+from .guard import handle_guard_action
 from .panel import refresh_group_config_panel
 from .r18 import handle_r18_toggle
 from .setu import handle_setu_toggle
@@ -41,6 +42,7 @@ _HANDLER_MAP = {
     "enable": handle_enable_toggle,
     "r18": handle_r18_toggle,
     "setu": handle_setu_toggle,
+    "guard": handle_guard_action,
     "chat": handle_chat_placeholder,
 }
 

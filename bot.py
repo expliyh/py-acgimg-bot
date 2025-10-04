@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from contextlib import suppress
 from typing import Literal
@@ -6,7 +5,7 @@ from typing import Literal
 from fastapi import Request
 
 from telegram import Bot, Update, BotCommand
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, ApplicationBuilder
 
 from configs import config
 from handlers import all_handlers
@@ -15,12 +14,13 @@ from registries import config_registry
 logger = logging.getLogger(__name__)
 
 BOT_COMMAND_DEFINITIONS: list[tuple[str, str]] = [
-    ("start", "开始使用机器人"),
-    ("setu", "发送随机涩图"),
-    ("option", "打开个人设置"),
-    ("admin", "打开管理面板"),
-    ("pinfo", "查看 Pixiv 插画信息"),
+    ("start", "\u5f00\u59cb\u4f7f\u7528\u673a\u5668\u4eba"),
+    ("setu", "\u53d1\u9001\u968f\u673a\u6da9\u56fe"),
+    ("option", "\u6253\u5f00\u4e2a\u4eba\u8bbe\u7f6e"),
+    ("admin", "\u6253\u5f00\u7ba1\u7406\u9762\u677f"),
+    ("pinfo", "\u67e5\u770b Pixiv \u63d2\u753b\u4fe1\u606f"),
 ]
+
 
 
 async def start(update: Update, context) -> None:
@@ -32,7 +32,6 @@ class TelegramBot:
     def __init__(self):
         self.tg_bot: Bot | None = None
         self.tg_app: Application | None = None
-        self.poll_task: asyncio.Task | None = None
         self._mode: Literal["webhook", "polling"] | None = None
         self._app_initialized = False
 
@@ -58,15 +57,7 @@ class TelegramBot:
 
         await self._shutdown()
 
-        self.tg_bot = Bot(token_value)
-        try:
-            await self.tg_bot.initialize()
-        except Exception:
-            logger.exception("Failed to initialize Telegram bot with provided token")
-            await self._shutdown()
-            return
-
-        self.tg_app = Application.builder().token(token_value).build()
+        self.tg_app = ApplicationBuilder().token(token_value).build()
         self.tg_app.add_handler(CommandHandler("start", start))
         self.tg_app.add_handlers(all_handlers)
 
@@ -77,9 +68,10 @@ class TelegramBot:
             await self._shutdown()
             return
 
-        await self._register_commands()
-
+        self.tg_bot = self.tg_app.bot
         self._app_initialized = True
+
+        await self._register_commands()
 
         external_url = config.external_url.strip() if config.external_url else ""
         if external_url:
@@ -99,14 +91,14 @@ class TelegramBot:
             )
             await self._shutdown()
 
-    async def _shutdown(self) -> None:
-        if self.poll_task:
-            self.poll_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self.poll_task
-            self.poll_task = None
+    async def shutdown(self) -> None:
+        await self._shutdown()
 
+    async def _shutdown(self) -> None:
         if self.tg_app:
+            if self.tg_app.updater and self.tg_app.updater.running:
+                with suppress(Exception):
+                    await self.tg_app.updater.stop()
             if self.tg_app.running:
                 await self.tg_app.stop()
             if self._app_initialized:
@@ -122,44 +114,39 @@ class TelegramBot:
         if not self.tg_bot or not self.tg_app:
             raise RuntimeError("Telegram bot is not initialized")
 
-        if self.tg_app.running:
-            await self.tg_app.stop()
-
-        webhook_url = self._build_webhook_url(external_url)
-        await self.tg_bot.set_webhook(webhook_url, drop_pending_updates=True)
+        if self.tg_app.updater and self.tg_app.updater.running:
+            await self.tg_app.updater.stop()
 
         if not self.tg_app.running:
             await self.tg_app.start()
 
+        if self.tg_app.update_queue is None:
+            raise RuntimeError("Telegram application does not expose an update queue")
+
+        webhook_url = self._build_webhook_url(external_url)
+        await self.tg_bot.set_webhook(
+            webhook_url,
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+        )
+
         self._mode = "webhook"
         logger.info("Telegram bot configured to use webhook mode: %s", webhook_url)
-
-    async def _custom_polling(self, interval: float = 2.0):
-        """Custom polling: fetch updates every `interval` seconds."""
-        offset = 0
-        while True:
-            print("POLL")
-            try:
-                updates = await self.tg_bot.get_updates(offset=offset, timeout=10)
-                for update in updates:
-                    offset = update.update_id + 1
-                    # Hand updates over to PTB manually
-                    await self.tg_app.process_update(update)
-            except Exception as e:
-                print(f"Polling error: {e}")
-            await asyncio.sleep(interval)
 
     async def _ensure_polling_mode(self) -> None:
         if not self.tg_bot or not self.tg_app:
             raise RuntimeError("Telegram bot is not initialized")
 
-        if self.tg_app.running:
-            # stop() will also stop updater if running
-            await self.tg_app.stop()
+        if not self.tg_app.running:
+            await self.tg_app.start()
 
         await self.tg_bot.delete_webhook(drop_pending_updates=True)
 
-        self.poll_task = asyncio.create_task(self._custom_polling(interval=2.0))
+        if not self.tg_app.updater:
+            raise RuntimeError("Telegram application updater is not available")
+
+        if not self.tg_app.updater.running:
+            await self.tg_app.updater.start_polling()
 
         self._mode = "polling"
         logger.info("Telegram bot configured to use polling mode")
@@ -213,8 +200,14 @@ class TelegramBot:
         if not self.tg_bot or not self.tg_app:
             raise RuntimeError("Telegram bot is not initialized")
 
-        update = Update.de_json(await request.json(), self.tg_bot)
-        await self.tg_app.process_update(update)
+        payload = await request.json()
+        update = Update.de_json(payload, self.tg_bot)
+
+        queue = self.tg_app.update_queue
+        if queue is None:
+            raise RuntimeError("Telegram application does not expose an update queue")
+
+        await queue.put(update)
 
 
 tg_bot = TelegramBot()
