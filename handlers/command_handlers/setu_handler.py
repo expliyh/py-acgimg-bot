@@ -2,6 +2,7 @@
 
 import logging
 from io import BytesIO
+from typing import Sequence
 
 from telegram import Update
 from telegram.error import TelegramError
@@ -24,6 +25,44 @@ from handlers.registry import bot_handler
 
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_pixiv_arguments(args: Sequence[str]) -> tuple[int | None, str | None]:
+    for raw in args:
+        value = raw.strip()
+        if not value:
+            continue
+        key, sep, rest = value.partition("=")
+        if sep:
+            if key.lower() not in {"id", "pixiv", "pid"}:
+                continue
+            candidate = rest.strip()
+            if not candidate:
+                return None, raw
+        else:
+            if not value.isdigit():
+                continue
+            candidate = value
+        if not candidate.isdigit():
+            return None, raw
+        try:
+            return int(candidate), None
+        except ValueError:
+            return None, raw
+    return None, None
+
+
+async def _reply_with_text(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    chat_id: int,
+    text: str,
+    reply_to_message_id: int | None,
+) -> None:
+    send_kwargs = {"chat_id": chat_id, "text": text}
+    if reply_to_message_id is not None:
+        send_kwargs["reply_to_message_id"] = reply_to_message_id
+    await context.bot.send_message(**send_kwargs)
 
 
 @bot_handler
@@ -56,10 +95,61 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         sanity_limit = min(sanity_limit, group.sanity_limit)
         allow_r18g = allow_r18g and group.allow_r18g
 
-    resource: ImageResource = await get_image(
-        sanity_limit=sanity_limit,
-        allow_r18g=allow_r18g,
-    )
+    args = tuple(getattr(context, "args", ()) or ())
+    pixiv_id, parse_error = _parse_pixiv_arguments(args)
+    reply_to_id = message.id if message else None
+    if parse_error:
+        await _reply_with_text(
+            context,
+            chat_id=chat_id,
+            text=f"ID 参数格式不正确：{parse_error}",
+            reply_to_message_id=reply_to_id,
+        )
+        return
+
+    if pixiv_id is not None:
+        illust_info = await illust_registry.get_illust_info(pixiv_id)
+        if illust_info is None:
+            await _reply_with_text(
+                context,
+                chat_id=chat_id,
+                text="未找到指定 ID 的图片，请先添加到数据库。",
+                reply_to_message_id=reply_to_id,
+            )
+            return
+        if illust_info.sanity_level > sanity_limit:
+            await _reply_with_text(
+                context,
+                chat_id=chat_id,
+                text="指定的图片过滤等级超过当前限制，无法发送。",
+                reply_to_message_id=reply_to_id,
+            )
+            return
+        if illust_info.r18g and not allow_r18g:
+            await _reply_with_text(
+                context,
+                chat_id=chat_id,
+                text="指定的图片包含 R18G 内容，当前设置不允许发送。",
+                reply_to_message_id=reply_to_id,
+            )
+            return
+
+    try:
+        resource: ImageResource = await get_image(
+            pixiv_id=pixiv_id,
+            sanity_limit=sanity_limit,
+            allow_r18g=allow_r18g,
+        )
+    except FileNotFoundError:
+        if pixiv_id is not None:
+            await _reply_with_text(
+                context,
+                chat_id=chat_id,
+                text="未能获取到指定 ID 的图片资源，请稍后再试。",
+                reply_to_message_id=reply_to_id,
+            )
+            return
+        raise
 
     illust = resource.illustration
     caption_lines = [
