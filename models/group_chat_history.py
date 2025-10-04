@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Enum, DateTime, Text, JSON
+from sqlalchemy import BigInteger, Column, String, Boolean, Enum, DateTime, Text, JSON
 
 from configs import config as file_config
 from defines import MessageType
@@ -8,9 +8,9 @@ from .base import Base
 
 class GroupChatHistory(Base):
     __tablename__ = f"{file_config.db_prefix}group_chat_history"
-    message_id = Column(Integer, primary_key=True, comment='消息的 ID')
-    group_id = Column(Integer, primary_key=True, nullable=False, comment='群组的 ID')
-    user_id = Column(Integer, primary_key=True, nullable=False, comment='用户的 ID')
+    message_id = Column(BigInteger, primary_key=True, comment='消息的 ID')
+    group_id = Column(BigInteger, primary_key=True, nullable=False, comment='群组的 ID')
+    user_id = Column(BigInteger, primary_key=True, nullable=False, comment='用户的 ID')
     type = Column(Enum(MessageType), default=MessageType.TEXT, index=True, nullable=False, comment='消息的类型')
     bot_send = Column(Boolean, default=False, nullable=False, comment='是否为机器人发送的消息')
     file_id = Column(String(128), nullable=True, comment='消息的文件 ID')

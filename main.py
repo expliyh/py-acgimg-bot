@@ -18,7 +18,7 @@ import uvicorn
 
 from configs import config, db_config_declare
 from registries.config_registry import init_database_config
-from services import pixiv, storage_service
+from services import pixiv, storage_service, schema_migrator
 
 # Enable logging
 logging.basicConfig(
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Tasks to run during application startup
     await engine.create_all()
+    await schema_migrator.ensure_schema_migrations(engine.engine)
     await storage_service.ensure_storage_config_defaults()
     storage = await storage_service.use()
     if storage is None:
