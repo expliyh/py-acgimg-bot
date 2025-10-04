@@ -42,6 +42,7 @@ async def config_group(*, group: Group | None = None, command_message_id: int | 
         f"群组 ID: {group.id}",
         f"名称: {group.name or '未设置'}",
         f"机器人启用: {_bool_icon(group.enable)}",
+        f"允许涩图: {_bool_icon(group.allow_setu)}",
         f"允许 R18: {_bool_icon(allow_r18)}",
         "AI 聊天: 🚧 暂未实现",
     ]
@@ -65,6 +66,16 @@ async def config_group(*, group: Group | None = None, command_message_id: int | 
                 callback_data=_build_callback(
                     group.id,
                     "enable:off" if group.enable else "enable:on",
+                    command_message_id,
+                ),
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "禁止涩图" if group.allow_setu else "允许涩图",
+                callback_data=_build_callback(
+                    group.id,
+                    "setu:off" if group.allow_setu else "setu:on",
                     command_message_id,
                 ),
             )

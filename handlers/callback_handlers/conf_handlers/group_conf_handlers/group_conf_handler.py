@@ -13,6 +13,7 @@ from .chat_placeholder import handle_chat_placeholder
 from .enable import handle_enable_toggle
 from .panel import refresh_group_config_panel
 from .r18 import handle_r18_toggle
+from .setu import handle_setu_toggle
 
 
 def _parse_command_message_id(cmd_parts: list[str]) -> int | None:
@@ -39,6 +40,7 @@ def _extract_args(cmd_parts: list[str]) -> tuple[int | None, list[str]]:
 _HANDLER_MAP = {
     "enable": handle_enable_toggle,
     "r18": handle_r18_toggle,
+    "setu": handle_setu_toggle,
     "chat": handle_chat_placeholder,
 }
 

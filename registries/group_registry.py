@@ -41,3 +41,12 @@ async def set_group_sanity_limit(group_id: int, sanity_limit: int) -> None:
             update(Group).where(Group.id == group_id).values(sanity_limit=sanity_limit)
         )
         await session.commit()
+
+async def set_group_allow_setu(group_id: int, allow: bool) -> None:
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        await session.execute(
+            update(Group).where(Group.id == group_id).values(allow_setu=allow)
+        )
+        await session.commit()
+
