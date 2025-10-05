@@ -24,10 +24,16 @@ def build_callback_data(base: str, command_message_id: int | None) -> str:
     return f"{base}:{command_message_id}"
 
 
-def register_panel(context: ContextTypes.DEFAULT_TYPE, panel_message_id: int, command_message_id: int | None) -> None:
+def register_panel(
+    context: ContextTypes.DEFAULT_TYPE,
+    panel_message_id: int,
+    command_message_id: int | None,
+    *,
+    chat_id: int | None = None,
+) -> None:
     """Store the originating command message for a rendered panel message."""
 
-    mapping = _ensure_panel_map(context)
+    mapping = _ensure_panel_map(context, chat_id=chat_id)
     mapping[panel_message_id] = command_message_id
 
 
@@ -48,11 +54,21 @@ def get_panel_command_message_id(
     return None
 
 
-def _ensure_panel_map(context: ContextTypes.DEFAULT_TYPE) -> dict[int, int | None]:
-    mapping = context.chat_data.get(_PANEL_MAP_KEY)
+def _ensure_panel_map(
+    context: ContextTypes.DEFAULT_TYPE, *, chat_id: int | None = None
+) -> dict[int, int | None]:
+    if chat_id is None:
+        chat_data = context.chat_data
+    else:
+        application = context.application
+        if application is None:
+            raise RuntimeError("Context application is not available while registering panel data")
+        chat_data = application.chat_data.setdefault(chat_id, {})
+
+    mapping = chat_data.get(_PANEL_MAP_KEY)
     if not isinstance(mapping, dict):
         mapping = {}
-        context.chat_data[_PANEL_MAP_KEY] = mapping
+        chat_data[_PANEL_MAP_KEY] = mapping
     return mapping
 
 
