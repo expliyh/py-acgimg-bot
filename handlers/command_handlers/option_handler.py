@@ -1,11 +1,14 @@
 import asyncio
 
-from telegram import Update, Message, InlineKeyboardMarkup
+from telegram import Update, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 import messase_generator
 from utils import is_group_type, delete_messages
-from registries import user_registry, group_registry, engine
+from registries import user_registry, group_registry
 from handlers.callback_handlers.panel_utils import register_panel
+from handlers.callback_handlers.option_panel_handler import (
+    build_option_callback_data,
+)
 from services.command_history import command_logger
 from handlers.registry import bot_handler
 from services.telegram_cache import get_cached_admin_ids
@@ -48,18 +51,36 @@ async def option_handler_func(update: Update, context) -> None:
                 delay=10
             ))
             return
-        config = await messase_generator.config_group(
-            group=group,
-            command_message_id=command_message_id,
+        selection_keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "在此处打开控制面板",
+                        callback_data=build_option_callback_data(
+                            "group", group.id, user.id, command_message_id
+                        ),
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "在私聊中打开控制面板",
+                        callback_data=build_option_callback_data(
+                            "private", group.id, user.id, command_message_id
+                        ),
+                    )
+                ],
+            ]
         )
 
-        message: Message = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=config.text,
-            reply_markup=InlineKeyboardMarkup(config.keyboard)
-        )
+        send_kwargs = {
+            "chat_id": update.effective_chat.id,
+            "text": "请选择在何处打开控制面板",
+            "reply_markup": selection_keyboard,
+        }
+        if command_message_id is not None:
+            send_kwargs["reply_to_message_id"] = command_message_id
 
-        register_panel(context, message.message_id, command_message_id)
+        await context.bot.send_message(**send_kwargs)
         return
 
     config = await messase_generator.config_user(page=1, user=user, command_message_id=command_message_id)

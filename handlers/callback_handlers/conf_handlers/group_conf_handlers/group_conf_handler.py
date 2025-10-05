@@ -65,14 +65,15 @@ async def group_conf_handler_func(
         await query.answer("无法识别的群组", show_alert=True)
         return
 
-    if chat.id != group_id:
+    chat_type = getattr(chat, "type", None)
+    if chat_type != "private" and chat.id != group_id:
         await query.answer("无效的群组操作", show_alert=True)
         return
 
     group = await group_registry.get_group_by_id(group_id)
     admin_ids = set(group.admin_ids or [])
     if not admin_ids:
-        fetched_admin_ids = await get_cached_admin_ids(context, chat.id)
+        fetched_admin_ids = await get_cached_admin_ids(context, group_id)
         if fetched_admin_ids:
             admin_ids = set(fetched_admin_ids)
 
