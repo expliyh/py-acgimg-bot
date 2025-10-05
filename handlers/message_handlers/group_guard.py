@@ -6,6 +6,8 @@ import re
 from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import false
+from sqlalchemy.sql.selectable import FromClauseAlias
 from telegram import (
     ChatPermissions,
     InlineKeyboardButton,
@@ -15,9 +17,10 @@ from telegram import (
 )
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, filters
 from telegram.helpers import mention_html
 
+from handlers.registry import message_handler
 from services import group_guard
 from utils import delete_messages, is_group_type
 
@@ -30,24 +33,26 @@ _DEFAULT_VERIFICATION_TEMPLATE = (
 )
 
 
-
-
 def _create_background_task(
-    context: ContextTypes.DEFAULT_TYPE,
-    coroutine: Awaitable[object],
+        context: ContextTypes.DEFAULT_TYPE,
+        coroutine: Awaitable[object],
 ) -> asyncio.Task[object]:
     application = getattr(context, "application", None)
     if application and application.running:
         return application.create_task(coroutine)
     return asyncio.create_task(coroutine)
 
+
+@message_handler(filters=filters.ChatType.GROUPS, block=False, no_parallel=True)
 async def handle_new_member_verification(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     message = update.effective_message
     chat = update.effective_chat
     bot = context.bot
+
+    logger.info("Handling new member verification")
 
     if message is None or chat is None or bot is None:
         return
@@ -82,13 +87,13 @@ async def handle_new_member_verification(
 
 
 async def _start_verification_flow(
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    chat_id: int,
-    chat_title: str,
-    member_id: int,
-    member_display: str,
-    settings: group_guard.GuardSettings,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        chat_id: int,
+        chat_title: str,
+        member_id: int,
+        member_display: str,
+        settings: group_guard.GuardSettings,
 ) -> None:
     bot = context.bot
     if bot is None:
@@ -164,10 +169,10 @@ async def _restrict_member(bot, chat_id: int, user_id: int) -> None:
 
 
 async def _schedule_verification_timeout(
-    bot,
-    pending: group_guard.PendingVerification,
-    *,
-    kick_on_timeout: bool,
+        bot,
+        pending: group_guard.PendingVerification,
+        *,
+        kick_on_timeout: bool,
 ) -> None:
     remaining = (pending.expires_at - datetime.now(timezone.utc)).total_seconds()
     await asyncio.sleep(max(0, remaining))
@@ -221,8 +226,8 @@ async def _schedule_verification_timeout(
 
 
 async def handle_group_keyword_filter(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     message = update.effective_message
     chat = update.effective_chat
@@ -273,9 +278,9 @@ async def _find_matching_rule(group_id: int, text: str) -> group_guard.KeywordRu
 
 
 async def _delete_message_safely(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    message: Message,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        message: Message,
 ) -> None:
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
@@ -289,10 +294,10 @@ async def _delete_message_safely(
 
 
 async def _notify_keyword_violation(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    message: Message,
-    rule: group_guard.KeywordRule,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        message: Message,
+        rule: group_guard.KeywordRule,
 ) -> None:
     user = message.from_user
     if user is None:

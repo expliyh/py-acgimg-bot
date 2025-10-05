@@ -4,6 +4,7 @@ from handlers.registry import iter_message_handlers
 
 # Import modules for side effects so their handlers register before aggregation.
 from . import (
+    group_guard,
     guard_add_keyword,
     guard_remove_keyword,
     guard_set_message,

@@ -11,6 +11,8 @@ from telegram.ext.filters import BaseFilter
 
 from handlers.message_handlers.AcgimgMessageHandler import AcgimgMessageHandler
 
+logger = logging.getLogger(__name__)
+
 Callback = TypeVar("Callback", bound=Callable[..., Awaitable[object]])
 MessageCallback = Callable[..., Awaitable[object]]
 
@@ -98,6 +100,7 @@ def message_handler(
             no_parallel=no_parallel,
             block=block,
         )
+        logger.error(f"Registered message handler {handler.callback}")
         _registered_message_handlers.append(handler)
         setattr(callback, "__message_handler_name__", handler_name)
         return callback
