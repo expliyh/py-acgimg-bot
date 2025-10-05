@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -58,6 +58,7 @@ class PendingVerification:
 
 _SETTINGS_CACHE_TTL = timedelta(seconds=30)
 _KEYWORD_CACHE_TTL = timedelta(seconds=30)
+MAX_KEYWORD_PATTERN_LENGTH = 512
 
 _settings_cache: dict[int, tuple[GuardSettings, datetime]] = {}
 _keyword_cache: dict[int, tuple[list[KeywordRule], datetime]] = {}
@@ -213,6 +214,11 @@ async def add_keyword_rule(
     raw_pattern = (pattern or "").strip()
     if not raw_pattern:
         raise ValueError("关键字不能为空")
+
+    if len(raw_pattern) > MAX_KEYWORD_PATTERN_LENGTH:
+        raise ValueError(
+            f"关键字长度不能超过 {MAX_KEYWORD_PATTERN_LENGTH} 个字符"
+        )
 
     if is_regex:
         flags = 0 if case_sensitive else re.IGNORECASE
@@ -399,3 +405,4 @@ def _ensure_timezone(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+

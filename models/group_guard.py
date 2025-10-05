@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text, func, Index
 
@@ -29,7 +29,7 @@ class GroupGuardKeywordRule(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     group_id = Column(BigInteger, nullable=False, index=True)
-    pattern = Column(Text, nullable=False)
+    pattern = Column(String(512), nullable=False)
     is_regex = Column(Boolean, nullable=False, default=False)
     case_sensitive = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
@@ -52,3 +52,4 @@ class GroupGuardPendingVerification(Base):
     __table_args__ = (
         Index("idx_guard_pending_expires", "expires_at"),
     )
+
