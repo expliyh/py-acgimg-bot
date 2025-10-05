@@ -8,7 +8,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from registries import illust_registry
-from services.image_service import ImageResource, get_image
+from services.image_service import ImageResource, get_image_resource
 from services.original_image_manager import (
     MAX_ATTEMPTS,
     get_request,
@@ -17,14 +17,13 @@ from services.original_image_manager import (
 )
 from utils import ensure_list_length
 
-
 logger = logging.getLogger(__name__)
 
 
 async def callback_original_image_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    args: list[str],
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        args: list[str],
 ) -> None:
     query = update.callback_query
     if query is None:
@@ -69,7 +68,7 @@ async def callback_original_image_handler(
     await query.answer("正在获取原图…", show_alert=False)
 
     try:
-        resource = await get_image(
+        resource = await get_image_resource(
             pixiv_id=state.pixiv_id,
             page_id=state.page_id,
             origin=True,
@@ -120,7 +119,7 @@ async def _send_original_image(bot, resource: ImageResource, chat_id: int) -> No
         else:
             return
 
-    document_file = BytesIO(resource.image_bytes)
+    document_file = BytesIO(await resource.fetcher(resource.filename, resource.link))
     document_file.name = resource.filename
     sent_message = await bot.send_document(chat_id=chat_id, document=document_file)
 

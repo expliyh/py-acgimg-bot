@@ -15,14 +15,13 @@ from utils import is_group_type, ensure_list_length
 
 from registries import user_registry, group_registry, illust_registry
 from services.command_history import command_logger
-from services.image_service import ImageResource, get_image
+from services.image_service import ImageResource, get_image_resource
 from services.original_image_manager import (
     OriginalImageRequest,
     create_request,
     register_request,
 )
 from handlers.registry import bot_handler
-
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +52,11 @@ def _parse_pixiv_arguments(args: Sequence[str]) -> tuple[int | None, str | None]
 
 
 async def _reply_with_text(
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    chat_id: int,
-    text: str,
-    reply_to_message_id: int | None,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        chat_id: int,
+        text: str,
+        reply_to_message_id: int | None,
 ) -> None:
     send_kwargs = {"chat_id": chat_id, "text": text}
     if reply_to_message_id is not None:
@@ -135,7 +134,7 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
     try:
-        resource: ImageResource = await get_image(
+        resource: ImageResource = await get_image_resource(
             pixiv_id=pixiv_id,
             sanity_limit=sanity_limit,
             allow_r18g=allow_r18g,
@@ -198,7 +197,7 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await register_request(context.bot, request_state)
             return
 
-    image_file = BytesIO(resource.image_bytes)
+    image_file = BytesIO(await resource.fetcher(resource.file_id, resource.link))
     image_file.name = resource.filename
     sent_message = await context.bot.send_photo(photo=image_file, **send_kwargs)
 

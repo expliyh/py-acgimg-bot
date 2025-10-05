@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 import random
+from typing import Callable, Awaitable
 
 from models import Illustration
 
@@ -16,7 +17,8 @@ class ImageResource:
     illustration: Illustration
     page_id: int
     filename: str
-    image_bytes: bytes
+    fetcher: Callable[[str, str], Awaitable[bytes]]
+    image_bytes: bytes | None
     file_id: str | None
     link: str
     is_original: bool
@@ -103,7 +105,7 @@ def _resolve_file_id(illust: Illustration, page_id: int, *, origin: bool) -> str
     return None
 
 
-async def get_image(
+async def get_image_resource(
     pixiv_id: int | None = None,
     page_id: int | None = None,
     origin: bool = False,
@@ -119,15 +121,14 @@ async def get_image(
         ext = _resolve_extension(illust, resolved_page_id, link)
         filename = f"{illust.id}_{resolved_page_id}{ext}"
         fetcher = file_service.get_file if origin else file_service.get_image
-        image = await fetcher(filename=filename, url=link)
-        if image is None:
-            raise FileNotFoundError("未能获取到图片文件")
+        image = None
         file_id = _resolve_file_id(illust, resolved_page_id, origin=origin)
         return ImageResource(
             illustration=illust,
             page_id=resolved_page_id,
             filename=filename,
             image_bytes=image,
+            fetcher=fetcher,
             file_id=file_id,
             link=link,
             is_original=origin,
@@ -144,9 +145,8 @@ async def get_image(
     link = _resolve_link(illust, resolved_page_id)
     ext = _resolve_extension(illust, resolved_page_id, link)
     filename = f"{illust.id}_{resolved_page_id}{ext}"
-    image = await file_service.get_image(filename=filename, url=link)
-    if image is None:
-        raise FileNotFoundError("未能获取到图片文件")
+    image = None
+    fetcher = file_service.get_image
 
     file_id = _resolve_file_id(illust, resolved_page_id, origin=False)
 
@@ -155,6 +155,7 @@ async def get_image(
         page_id=resolved_page_id,
         filename=filename,
         image_bytes=image,
+        fetcher=fetcher,
         file_id=file_id,
         link=link,
         is_original=False,
