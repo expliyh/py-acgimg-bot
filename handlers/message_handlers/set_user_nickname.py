@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, filters
 
 from registries import active_message_handler_registry, user_registry
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _HANDLER_PREFIX = "set_user_nickname"
 
 
-@message_handler
+@message_handler(filters=filters.TEXT & ~filters.COMMAND)
 async def set_user_nickname(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

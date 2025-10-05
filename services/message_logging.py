@@ -18,6 +18,19 @@ from utils import is_group_type
 
 logger = logging.getLogger(__name__)
 
+TEXT_PREVIEW_LIMIT = 120
+
+
+def _preview_text(text: str | None, limit: int = TEXT_PREVIEW_LIMIT) -> str | None:
+    if not text:
+        return None
+
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+
+    return normalized[:limit] + "..."
+
 
 @dataclass(slots=True)
 class ParsedMessage:
@@ -80,12 +93,14 @@ async def _store_group_message(
         if db_user is None:
             db_user = User(id=user.id)
             session.add(db_user)
+            logger.debug("Created new user record user_id=%s during group message logging", user.id)
         _sync_user_profile(db_user, user)
 
         db_group = await session.get(Group, chat.id)
         if db_group is None:
             db_group = Group(id=chat.id)
             session.add(db_group)
+            logger.debug("Created new group record chat_id=%s during message logging", chat.id)
         _sync_group_profile(db_group, chat, admin_ids)
 
         await session.merge(
@@ -103,6 +118,14 @@ async def _store_group_message(
         )
 
         await session.commit()
+        logger.debug(
+            "Persisted group message chat_id=%s message_id=%s type=%s bot_send=%s text=%s",
+            chat.id,
+            message.message_id,
+            parsed.message_type,
+            bot_send,
+            _preview_text(parsed.text),
+        )
 
 
 async def _store_private_message(
@@ -117,6 +140,7 @@ async def _store_private_message(
         if db_user is None:
             db_user = User(id=user.id)
             session.add(db_user)
+            logger.debug("Created new user record user_id=%s during private message logging", user.id)
         _sync_user_profile(db_user, user)
 
         await session.merge(
@@ -133,6 +157,14 @@ async def _store_private_message(
         )
 
         await session.commit()
+        logger.debug(
+            "Persisted private message user_id=%s message_id=%s type=%s bot_send=%s text=%s",
+            user.id,
+            message.message_id,
+            parsed.message_type,
+            bot_send,
+            _preview_text(parsed.text),
+        )
 
 
 def _sync_user_profile(db_user: User, tg_user: TgUser) -> None:
@@ -140,6 +172,7 @@ def _sync_user_profile(db_user: User, tg_user: TgUser) -> None:
 
     nickname = _extract_user_display_name(tg_user)
     if nickname != db_user.nick_name:
+        logger.debug("Updating nickname for user_id=%s to %r", db_user.id, nickname)
         db_user.nick_name = nickname
 
 
@@ -147,9 +180,11 @@ def _sync_group_profile(db_group: Group, chat: Chat, admin_ids: Sequence[int] | 
     """Update stored group metadata based on the latest chat information."""
 
     if chat.title and chat.title != db_group.name:
+        logger.debug("Updating group %s title to %r", db_group.id, chat.title)
         db_group.name = chat.title
 
     if admin_ids is not None and _admin_list_changed(db_group.admin_ids, admin_ids):
+        logger.debug("Updating group %s admin ids to %s", db_group.id, list(admin_ids))
         db_group.admin_ids = list(admin_ids)
 
 
@@ -158,6 +193,7 @@ def _parse_message(message: Message) -> ParsedMessage | None:
 
     message_type = _detect_message_type(message)
     if message_type is None:
+        logger.debug("Skipping message_id=%s: unsupported content", message.message_id)
         return None
 
     text = message.text or message.caption

@@ -1,4 +1,4 @@
-﻿"""Message handler for removing guard keyword rules via chat."""
+"""Message handler for removing guard keyword rules via chat."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 
 from telegram import Update
 from telegram.error import TelegramError
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, filters
 
 from handlers.callback_handlers.conf_handlers.group_conf_handlers.panel import (
     refresh_group_config_panel,
@@ -21,7 +21,7 @@ _HANDLER_PREFIX = "guard_remove_keyword"
 _CANCEL_TOKENS = {"-", "取消", "cancel"}
 
 
-@message_handler
+@message_handler(filters=filters.TEXT & ~filters.COMMAND)
 async def guard_remove_keyword(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

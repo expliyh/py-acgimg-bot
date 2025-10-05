@@ -1,11 +1,11 @@
-﻿"""Message handler that stores Pixiv refresh tokens submitted via chat."""
+"""Message handler that stores Pixiv refresh tokens submitted via chat."""
 
 from __future__ import annotations
 
 import logging
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, filters
 
 from registries import active_message_handler_registry, config_registry
 from services import pixiv
@@ -38,7 +38,7 @@ async def _reload_pixiv_state() -> None:
         await pixiv.token_refresh(force=True)
 
 
-@message_handler
+@message_handler(filters=filters.TEXT & ~filters.COMMAND)
 async def set_pixiv_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

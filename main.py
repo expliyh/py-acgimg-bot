@@ -19,14 +19,9 @@ import uvicorn
 from configs import config, db_config_declare
 from registries.config_registry import init_database_config
 from services import pixiv, storage_service, schema_migrator
+from utils.logging_config import setup_logging
 
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-# set higher logging level for httpx to avoid all GET and POST requests being logged
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

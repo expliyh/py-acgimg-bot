@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypeVar, overload
 
-from telegram.ext import BaseHandler, CommandHandler
+from telegram import Update
+from telegram.ext import BaseHandler, CommandHandler, MessageHandler, filters as tg_filters, ContextTypes
+from telegram.ext.filters import BaseFilter
+
+from handlers.message_handlers.AcgimgMessageHandler import AcgimgMessageHandler
 
 Callback = TypeVar("Callback", bound=Callable[..., Awaitable[object]])
-
 MessageCallback = Callable[..., Awaitable[object]]
 
 _registered_handlers: list[BaseHandler] = []
-_registered_message_handlers: dict[str, MessageCallback] = {}
+_registered_message_handlers: list[AcgimgMessageHandler] = []
 
 
 @overload
@@ -20,20 +25,20 @@ def bot_handler(func: Callback) -> Callback:
 
 @overload
 def bot_handler(
-    *,
-    commands: str | Sequence[str] | None = None,
-    builder: Callable[[Callback], BaseHandler] | None = None,
-    **handler_kwargs: Any,
+        *,
+        commands: str | Sequence[str] | None = None,
+        builder: Callable[[Callback], BaseHandler] | None = None,
+        **handler_kwargs: Any,
 ) -> Callable[[Callback], Callback]:
     ...
 
 
 def bot_handler(
-    func: Callback | None = None,
-    *,
-    commands: str | Sequence[str] | None = None,
-    builder: Callable[[Callback], BaseHandler] | None = None,
-    **handler_kwargs: Any,
+        func: Callback | None = None,
+        *,
+        commands: str | Sequence[str] | None = None,
+        builder: Callable[[Callback], BaseHandler] | None = None,
+        **handler_kwargs: Any,
 ):
     """Register a handler callback via decorator usage.
 
@@ -56,21 +61,29 @@ def bot_handler(
     return register
 
 
-
 @overload
 def message_handler(func: MessageCallback) -> MessageCallback:
     ...
 
 
 @overload
-def message_handler(*, name: str | None = None) -> Callable[[MessageCallback], MessageCallback]:
+def message_handler(
+        *,
+        filters: BaseFilter = tg_filters.ALL,
+        no_parallel: bool = True,
+        block: bool = False,
+        name: str | None = None,
+) -> Callable[[MessageCallback], MessageCallback]:
     ...
 
 
 def message_handler(
-    func: MessageCallback | None = None,
-    *,
-    name: str | None = None,
+        func: MessageCallback | None = None,
+        *,
+        filters: BaseFilter = tg_filters.ALL,
+        no_parallel: bool = True,
+        block: bool = False,
+        name: str | None = None,
 ) -> MessageCallback | Callable[[MessageCallback], MessageCallback]:
     """Register a message handler callback via decorator usage."""
 
@@ -78,7 +91,15 @@ def message_handler(
         handler_name = name or getattr(callback, "__message_handler_name__", None) or callback.__name__
         if not handler_name:
             raise ValueError("Message handler name could not be determined")
-        _registered_message_handlers[handler_name] = callback
+
+        handler = AcgimgMessageHandler(
+            filters=filters,
+            callback=callback,
+            no_parallel=no_parallel,
+            block=block,
+        )
+        _registered_message_handlers.append(handler)
+        setattr(callback, "__message_handler_name__", handler_name)
         return callback
 
     if func is not None:
@@ -86,10 +107,28 @@ def message_handler(
     return register
 
 
-def iter_message_handlers() -> dict[str, MessageCallback]:
-    """Return a snapshot of all registered message handler callbacks keyed by name."""
+def iter_message_handlers() -> list[AcgimgMessageHandler]:
+    """Return a snapshot of all registered telegram message handlers."""
 
-    return dict(_registered_message_handlers)
+    return list(_registered_message_handlers)
+
+
+async def message_handler_foreach(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Register a callback for each registered message handler."""
+
+    pending_list = list()
+    for handler in iter_message_handlers():
+        logging.info("Checking message handler: %s", handler.callback)
+        if handler.check_update(update):
+            if handler.no_parallel:
+                await asyncio.gather(*pending_list)
+                await handler.handle_update(update, context)
+            else:
+                pending_list.append(asyncio.create_task(handler.handle_update(update, context)))
+        if handler.block:
+            await asyncio.gather(*pending_list)
+            return
+    await asyncio.gather(*pending_list)
 
 
 def iter_bot_handlers() -> list[BaseHandler]:
@@ -99,11 +138,11 @@ def iter_bot_handlers() -> list[BaseHandler]:
 
 
 def _build_handler(
-    callback: Callback,
-    *,
-    commands: str | Sequence[str] | None,
-    builder: Callable[[Callback], BaseHandler] | None,
-    handler_kwargs: dict[str, Any],
+        callback: Callback,
+        *,
+        commands: str | Sequence[str] | None,
+        builder: Callable[[Callback], BaseHandler] | None,
+        handler_kwargs: dict[str, Any],
 ) -> BaseHandler:
     if builder is not None:
         handler = builder(callback)
@@ -115,10 +154,10 @@ def _build_handler(
 
 
 def _build_command_handler(
-    callback: Callback,
-    *,
-    commands: str | Sequence[str] | None,
-    handler_kwargs: dict[str, Any],
+        callback: Callback,
+        *,
+        commands: str | Sequence[str] | None,
+        handler_kwargs: dict[str, Any],
 ) -> CommandHandler:
     command_names = commands
     if command_names is None:

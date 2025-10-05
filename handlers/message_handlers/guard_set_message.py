@@ -1,4 +1,4 @@
-﻿"""Message handler for updating guard verification message via chat."""
+"""Message handler for updating guard verification message via chat."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 
 from telegram import Update
 from telegram.error import TelegramError
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, filters
 
 from handlers.callback_handlers.conf_handlers.group_conf_handlers.panel import (
     refresh_group_config_panel,
@@ -22,7 +22,7 @@ _CANCEL_TOKENS = {"-", "默认", "default", "取消", "cancel"}
 _MAX_LENGTH = 400
 
 
-@message_handler
+@message_handler(filters=filters.TEXT & ~filters.COMMAND)
 async def guard_set_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

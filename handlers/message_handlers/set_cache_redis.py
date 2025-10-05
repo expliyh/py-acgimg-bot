@@ -6,7 +6,7 @@ import logging
 
 from telegram import Update
 from telegram.error import TelegramError
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, filters
 
 from handlers.callback_handlers.conf_handlers.bot.panel import refresh_bot_config_panel
 from registries import active_message_handler_registry, config_registry
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _HANDLER_PREFIX = "set_cache_redis"
 
 
-@message_handler
+@message_handler(filters=filters.TEXT & ~filters.COMMAND)
 async def set_cache_redis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user

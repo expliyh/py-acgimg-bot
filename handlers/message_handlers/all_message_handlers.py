@@ -1,4 +1,4 @@
-﻿"""Aggregate all message handler callbacks registered via decorators."""
+"""Aggregate all message handler callbacks registered via decorators."""
 
 from handlers.registry import iter_message_handlers
 
