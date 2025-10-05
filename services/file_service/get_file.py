@@ -92,10 +92,26 @@ async def _ensure_cached_file(filename: str, url: str | None) -> Path:
 
     return cache_path
 
+def _prepare_for_webp(image: Image.Image) -> Image.Image:
+    """Return an RGBA copy ready for WebP encoding."""
+    if image.mode == "RGBA":
+        return image.copy()
+    if image.mode == "RGB":
+        return image.convert("RGBA")
+    if image.mode in {"LA", "L"}:
+        return image.convert("RGBA")
+    if image.mode == "P":
+        return image.convert("RGBA")
+    if image.mode in {"CMYK", "YCbCr", "HSV", "LAB"}:
+        return image.convert("RGBA")
+    return image.convert("RGBA")
+
 
 def compress_image(infile, target_size_mb=10, step=5, quality=95) -> str:
     """
     Compress an image to be within the target size in megabytes.
+
+    The image will be re-encoded as WebP while attempting to meet the limit.
 
     :param infile: Input image file path
     :param target_size_mb: Target size in megabytes
@@ -103,29 +119,26 @@ def compress_image(infile, target_size_mb=10, step=5, quality=95) -> str:
     :param quality: Starting quality for compression
     :return: str. Output image file path.
     """
-    # 计算目标字节数
     target_size = target_size_mb * 1024 * 1024
 
-    # 读取图片
-    img = Image.open(infile)
+    with Image.open(infile) as original:
+        img = _prepare_for_webp(original)
 
-    # 初始的临时文件名
-    outfile = os.path.splitext(infile)[0] + "_compressed.jpg"
+    outfile = os.path.splitext(infile)[0] + "_compressed.webp"
 
-    # 循环直到图片大小小于目标大小
-    while True:
-        # Save the image with the current quality level
-        img.save(outfile, 'JPEG', quality=quality)
+    try:
+        while True:
+            img.save(outfile, 'WEBP', quality=quality)
 
-        # Check the size of the output file
-        if os.path.getsize(outfile) <= target_size:
-            break  # 如果文件大小符合要求则退出循环
+            if os.path.getsize(outfile) <= target_size:
+                break
 
-        # 否则减少图片质量
-        quality -= step
-        # 如果质量在某个阈值以下，不再继续减小
-        if quality < 30:
-            raise Exception("Cannot compress the image enough to meet the target size.")
+            quality -= step
+            if quality < 30:
+                raise Exception("Cannot compress the image enough to meet the target size.")
+    finally:
+        img.close()
+
     return outfile
     # print(f"Image compressed to {quality}% and saved as '{outfile}'")
 
