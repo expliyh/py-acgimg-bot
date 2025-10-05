@@ -13,6 +13,7 @@ from .panel import refresh_bot_config_panel
 _MUTABLE_FLAGS = {
     "allow_r18g": ("允许 R18G", "已允许", "已禁用"),
     "enable_on_new_group": ("新群自动启用", "默认启用", "默认关闭"),
+    "pixiv_cache_to_telegram": ("导入时缓存 Pixiv 文件", "已开启", "已关闭"),
 }
 
 

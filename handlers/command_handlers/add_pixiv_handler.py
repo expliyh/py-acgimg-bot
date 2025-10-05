@@ -22,12 +22,17 @@ def _build_chat_candidates(update: Update) -> list[int]:
     return candidates
 
 
-def _format_page_summary(index: int, *, storage: bool, photo: bool, document: bool) -> str:
+def _format_page_summary(
+    index: int, *, storage: bool, photo: bool, document: bool, cache_enabled: bool
+) -> str:
+    storage_status = "成功" if storage else "失败"
+    photo_status = "已缓存" if photo else ("缺失" if cache_enabled else "待发送缓存")
+    document_status = "已缓存" if document else ("缺失" if cache_enabled else "待发送缓存")
     return (
-        f" - 第 {index + 1} 页："
-        f"存储{'成功' if storage else '失败'}，"
-        f"PhotoID{'已缓存' if photo else '缺失'}，"
-        f"DocumentID{'已缓存' if document else '缺失'}"
+        f" - 第{index + 1} 页："
+        f"存储{storage_status}；"
+        f"PhotoID{photo_status}；"
+        f"DocumentID{document_status}"
     )
 
 
@@ -42,7 +47,9 @@ async def add_pixiv_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     args = context.args or []
     if not args:
-        await update.effective_message.reply_text("请提供要导入的 Pixiv ID，例如 /addpixiv 12345678。")
+        await update.effective_message.reply_text(
+            "请提供要导入的 Pixiv ID，例如 /addpixiv 12345678。"
+        )
         return
 
     pixiv_id_raw = args[0].strip()
@@ -57,7 +64,7 @@ async def add_pixiv_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.effective_message.reply_text("您没有权限使用此命令。")
         return
 
-    status_message = await update.effective_message.reply_text("正在导入插画，请稍候……")
+    status_message = await update.effective_message.reply_text("正在导入插画，请稍候…")
     chat_candidates = _build_chat_candidates(update)
 
     try:
@@ -77,6 +84,8 @@ async def add_pixiv_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"已{'新增' if result.created else '更新'}。"
     )
     summary_lines = [header, f"共处理 {len(result.pages)} 张图片。"]
+    if not result.telegram_cache_enabled:
+        summary_lines.append("当前配置为导入阶段不缓存，首次发送时将自动在 Telegram 缓存文件 ID。")
     for page in result.pages:
         summary_lines.append(
             _format_page_summary(
@@ -84,6 +93,7 @@ async def add_pixiv_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 storage=bool(page.storage_url),
                 photo=bool(page.compressed_file_id),
                 document=bool(page.original_file_id),
+                cache_enabled=result.telegram_cache_enabled,
             )
         )
 

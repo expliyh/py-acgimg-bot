@@ -1,4 +1,4 @@
-"""Configuration endpoints exposing feature toggles for the admin console."""
+﻿"""Configuration endpoints exposing feature toggles for the admin console."""
 
 from __future__ import annotations
 
@@ -70,6 +70,14 @@ async def get_feature_flags() -> FeatureFlagResponse:
             "category": "群组管理",
             "editable": True,
         },
+        {
+            "key": "pixiv_cache_to_telegram",
+            "label": "导入时缓存 Pixiv 文件",
+            "description": "控制导入 Pixiv 插画时是否预先向 Telegram 缓存文件 ID；关闭后将在首次发送时缓存。",
+            "default": True,
+            "category": "Pixiv",
+            "editable": True,
+        },
     ]
 
     features: list[FeatureFlag] = []
@@ -120,7 +128,7 @@ async def get_feature_flags() -> FeatureFlagResponse:
 async def update_feature_flag(key: str, payload: FeatureFlagUpdate) -> FeatureFlag:
     """Update a mutable feature flag value."""
 
-    mutable_keys = {"allow_r18g", "enable_on_new_group"}
+    mutable_keys = {"allow_r18g", "enable_on_new_group", "pixiv_cache_to_telegram"}
     if key not in mutable_keys:
         raise HTTPException(status_code=404, detail="Feature flag not found or not editable")
 
@@ -133,6 +141,11 @@ async def update_feature_flag(key: str, payload: FeatureFlagUpdate) -> FeatureFl
             "新群自动启用",
             "当新的群组加入时是否默认启用全部功能。",
             "群组管理",
+        ),
+        "pixiv_cache_to_telegram": (
+            "导入时缓存 Pixiv 文件",
+            "控制导入阶段是否预缓存 Telegram 文件 ID；关闭后将在首次发送时缓存。",
+            "Pixiv",
         ),
     }
     label, description, category = labels[key]

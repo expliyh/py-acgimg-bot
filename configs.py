@@ -7,6 +7,7 @@ __env_path = '.env'
 db_config_declare = {
     'allow_r18g': False,
     'enable_on_new_group': False,
+    'pixiv_cache_to_telegram': True,
     'super_user': '1285315854',
 }
 
@@ -24,3 +25,4 @@ class __Config:
 
 
 config = __Config()
+

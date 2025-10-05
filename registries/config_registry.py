@@ -126,7 +126,7 @@ async def add_config(config: Config, default: str | bool) -> None:
 
 
 async def update_config(key: str, value: str | bool) -> None:
-    config = Config(key)
+    config = Config(key=key)
     config.value_str = value if isinstance(value, str) else None
     config.value_bool = value if isinstance(value, bool) else None
 

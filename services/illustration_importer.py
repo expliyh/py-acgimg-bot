@@ -9,7 +9,7 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 from models import Illustration
-from registries import illust_registry
+from registries import config_registry, illust_registry
 from services.file_service import get_file
 from services.pixiv_service import pixiv
 from services.storage_service import use as use_storage
@@ -29,6 +29,7 @@ class ImportedPage:
 class IllustrationImportResult:
     illustration: Illustration
     created: bool
+    telegram_cache_enabled: bool = True
     pages: list[ImportedPage] = field(default_factory=list)
 
 
@@ -121,6 +122,18 @@ def _ensure_list(container: object, length: int) -> list:
     return [None] * length
 
 
+def _resolve_bool(value: str | bool | None, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+    return default
+
+
 async def import_illustration(
     pixiv_id: int,
     *,
@@ -140,6 +153,18 @@ async def import_illustration(
     existing = await illust_registry.get_illust_info(str(illust.id))
     created = existing is None
 
+    cache_config_raw = await config_registry.get_config("pixiv_cache_to_telegram")
+    telegram_cache_enabled = _resolve_bool(cache_config_raw, default=True)
+
+    existing_compressed_ids = _ensure_list(
+        existing.compressed_file_ids if existing else None,
+        illust.page_count,
+    )
+    existing_original_ids = _ensure_list(
+        existing.original_file_ids if existing else None,
+        illust.page_count,
+    )
+
     chat_candidates = _unique_chat_ids(telegram_chat_ids)
 
     illust.file_urls = _ensure_list(getattr(illust, "file_urls", None), illust.page_count)
@@ -155,7 +180,7 @@ async def import_illustration(
         elif isinstance(illust.origin_urls, str):
             origin_url = illust.origin_urls
         if not origin_url:
-            raise RuntimeError(f"缺少第 {page_index + 1} 页的原图链接")
+            raise RuntimeError(f"缺少第{page_index + 1} 页的原图链接")
 
         ext: str | None = None
         if isinstance(illust.file_ext, list):
@@ -171,7 +196,7 @@ async def import_illustration(
         filename = f"{illust.id}_{page_index:02d}{ext}"
         file_bytes = await get_file(filename=filename, url=origin_url)
         if file_bytes is None:
-            raise RuntimeError(f"无法下载第 {page_index + 1} 页的图片")
+            raise RuntimeError(f"无法下载第{page_index + 1} 页的图片")
 
         storage_url = await storage.upload(
             file_bytes,
@@ -181,7 +206,7 @@ async def import_illustration(
 
         compressed_id: str | None = None
         original_id: str | None = None
-        if bot is not None and chat_candidates:
+        if bot is not None and chat_candidates and telegram_cache_enabled:
             compressed_id, used_chat = await _cache_photo_file_id(
                 bot,
                 chat_candidates,
@@ -199,6 +224,9 @@ async def import_illustration(
                 filename,
                 cleanup=cleanup_messages,
             )
+        elif not telegram_cache_enabled:
+            compressed_id = existing_compressed_ids[page_index]
+            original_id = existing_original_ids[page_index]
 
         illust.file_urls[page_index] = storage_url
         illust.compressed_file_ids[page_index] = compressed_id
@@ -221,5 +249,9 @@ async def import_illustration(
     return IllustrationImportResult(
         illustration=saved,
         created=created,
+        telegram_cache_enabled=telegram_cache_enabled,
         pages=pages,
     )
+
+
+

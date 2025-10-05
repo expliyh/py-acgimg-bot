@@ -16,6 +16,7 @@ from utils import is_group_type, ensure_list_length
 from registries import user_registry, group_registry, illust_registry
 from services.command_history import command_logger
 from services.image_service import ImageResource, get_image_resource
+from services.storage_service import use as use_storage
 from services.original_image_manager import (
     OriginalImageRequest,
     create_request,
@@ -197,7 +198,31 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await register_request(context.bot, request_state)
             return
 
-    image_file = BytesIO(await resource.fetcher(resource.file_id, resource.link))
+    file_bytes = await resource.fetcher(resource.filename, resource.link)
+
+    storage = await use_storage()
+    if storage is not None:
+        file_urls = ensure_list_length(getattr(illust, "file_urls", None), illust.page_count)
+        existing_url = file_urls[resource.page_id]
+        if not existing_url:
+            storage_folder = storage.join_path("pixiv", str(illust.id))
+            try:
+                storage_url = await storage.upload(
+                    file_bytes,
+                    resource.filename,
+                    sub_folder=storage_folder,
+                )
+            except Exception as exc:
+                logger.warning("Failed to upload image to storage: %s", exc)
+            else:
+                file_urls[resource.page_id] = storage_url
+                illust.file_urls = file_urls
+                try:
+                    await illust_registry.save_illustration(illust)
+                except Exception as exc:
+                    logger.warning("Failed to persist storage URL for illustration %s: %s", illust.id, exc)
+
+    image_file = BytesIO(file_bytes)
     image_file.name = resource.filename
     sent_message = await context.bot.send_photo(photo=image_file, **send_kwargs)
 

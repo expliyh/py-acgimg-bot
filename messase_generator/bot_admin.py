@@ -46,11 +46,11 @@ def _storage_label(current: str | None) -> str:
 
 
 
-
 def _build_callback(base: str, command_message_id: int | None) -> str:
     if command_message_id is None:
         return base
     return f"{base}:{command_message_id}"
+
 def _backblaze_ready(config) -> bool:
     return bool(config.app_id and config.app_key and config.bucket_name)
 
@@ -70,6 +70,9 @@ def _md(line: str) -> str:
 async def bot_admin(page: int = 1, *, command_message_id: int | None = None) -> BotAdmin:
     allow_r18g = _is_truthy(await config_registry.get_config("allow_r18g"))
     enable_on_new_group = _is_truthy(await config_registry.get_config("enable_on_new_group"))
+
+    pixiv_cache_raw = await config_registry.get_config("pixiv_cache_to_telegram")
+    pixiv_import_cache = True if pixiv_cache_raw is None else _is_truthy(pixiv_cache_raw)
 
     storage_choice = await config_registry.get_config("storage_service_use")
     if isinstance(storage_choice, str):
@@ -93,6 +96,7 @@ async def bot_admin(page: int = 1, *, command_message_id: int | None = None) -> 
         "功能开关:",
         f"- 允许 R18G: {_bool_icon(allow_r18g)}",
         f"- 新群自动启用: {_bool_icon(enable_on_new_group)}",
+        f"- 导入时缓存 Pixiv 文件: {_bool_icon(pixiv_import_cache)}",
         "",
         "存储服务:",
         f"- 当前驱动: {_storage_label(storage_choice)}",
@@ -124,6 +128,12 @@ async def bot_admin(page: int = 1, *, command_message_id: int | None = None) -> 
             InlineKeyboardButton(
                 f"切换新群自动启用 ({'开启' if enable_on_new_group else '关闭'})",
                 callback_data="conf:bot:feature:enable_on_new_group:toggle",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"切换导入时缓存 ({'开启' if pixiv_import_cache else '关闭'})",
+                callback_data="conf:bot:feature:pixiv_cache_to_telegram:toggle",
             )
         ],
         [
