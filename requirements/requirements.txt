@@ -1,6 +1,6 @@
 fastapi~=0.118.0
 uvicorn==0.37.0
-python-telegram-bot[all]==22.5
+python-telegram-bot[all]==22.8
 sqlalchemy[asyncio]==2.0.43
 asyncmy==0.2.10
 mariadb==1.1.13
