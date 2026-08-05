@@ -7,7 +7,7 @@ mariadb==1.1.13
 python-dotenv>=1.0.0,<2.0.0
 aiosqlite==0.22.1
 singleton-class-decorator>=1.0.1,<2.0.0
-aiofiles==24.1.0
+aiofiles==25.1.0
 aiohttp==3.12.15
 aiorwlock==1.5.0
 pillow==11.3.0
