@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -75,3 +76,79 @@ def pixiv_enabled(monkeypatch):
 
     monkeypatch.setattr(pixiv, "enabled", True)
     return pixiv
+
+
+@pytest.fixture(scope="session")
+def live_server_url(tmp_path_factory):
+    """Start a real uvicorn server process against an isolated SQLite database.
+
+    Yields the base URL (e.g. ``http://127.0.0.1:54321``); the server is
+    terminated when the session ends.
+    """
+    import socket
+    import subprocess
+    import sys
+    import time
+    import urllib.request
+
+    db_path = tmp_path_factory.mktemp("live") / "live.db"
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    env = dict(os.environ)
+    env["SQLITE_PATH"] = str(db_path)
+    env["AUTO_START_FRONTEND"] = "0"  # 子进程不拉起 Vite dev server
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    url = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                raise RuntimeError(
+                    f"uvicorn exited early with code {proc.returncode}"
+                )
+            try:
+                with urllib.request.urlopen(f"{url}/", timeout=2):
+                    break
+            except Exception:
+                time.sleep(0.5)
+        else:
+            raise RuntimeError("uvicorn did not become ready within 60s")
+        yield url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+@pytest.fixture()
+def http_client(live_server_url):
+    """HTTP client that talks to the real live server over TCP."""
+    import httpx
+
+    with httpx.Client(base_url=live_server_url, timeout=10) as client:
+        yield client

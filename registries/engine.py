@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 from singleton_class_decorator import singleton
 from sqlalchemy import select, update, func, delete
@@ -17,8 +18,8 @@ def _build_db_url() -> str:
     """
     if config_file.db_type == 'sqlite':
         storage_dir = Path(__file__).resolve().parent.parent / "storage"
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        db_path = storage_dir / "acgimg.db"
+        db_path = Path(os.getenv("SQLITE_PATH") or (storage_dir / "acgimg.db"))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite+aiosqlite:///{db_path.as_posix()}"
     return (
         f"mariadb+asyncmy://{config_file.db_username}:"
