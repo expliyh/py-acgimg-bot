@@ -23,3 +23,6 @@ logs/
 /.venv/
 # Reasonix 工具运行时数据
 /.reasonix/
+
+# Vite 临时文件
+webui/*.timestamp-*.mjs
