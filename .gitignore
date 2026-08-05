@@ -15,6 +15,11 @@
 /**/node_modules/
 /**/.idea/
 /**/.vite/
+/**/dist/
 /storage/
 /**/tmp/
 logs/
+# Python 虚拟环境
+/.venv/
+# Reasonix 工具运行时数据
+/.reasonix/

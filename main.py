@@ -13,13 +13,23 @@ from bot import tg_bot
 
 from contextlib import asynccontextmanager
 from registries import engine, config_registry
-from routers import configs as config_routes, dashboard, groups, private, commands
+from routers import (
+    configs as config_routes,
+    dashboard,
+    groups,
+    private,
+    commands,
+    bot_tokens,
+    pixiv_tokens,
+    illustrations,
+)
 import uvicorn
 
 from configs import config, db_config_declare
 from registries.config_registry import init_database_config
 from services import pixiv, storage_service, schema_migrator
 from utils.logging_config import setup_logging
+from utils import frontend_launcher
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -43,6 +53,8 @@ async def lifespan(app: FastAPI):
             logger.warning("No storage service set")
         else:
             await storage.get_config()
+        if frontend_launcher.auto_start_enabled() and not dist_dir.exists():
+            await frontend_launcher.start_frontend_dev_server()
         await tg_bot.config()
         await pixiv.read_token_from_config()
         if pixiv.enabled:
@@ -64,6 +76,10 @@ async def lifespan(app: FastAPI):
             await tg_bot.shutdown()
         except Exception:
             logger.exception("Error while shutting down Telegram bot")
+        try:
+            await frontend_launcher.stop_frontend_dev_server()
+        except Exception:
+            logger.exception("Error while stopping frontend dev server")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -74,20 +90,19 @@ for router in (
     private.router,
     config_routes.router,
     commands.router,
+    bot_tokens.router,
+    pixiv_tokens.router,
+    illustrations.router,
 ):
     app.include_router(router)
 
 webui_dir = Path(__file__).parent / "webui"
 dist_dir = webui_dir / "dist"
-static_source: Path | None = None
 
+# 仅在生产构建产物存在时挂载 /admin；开发模式下由自动启动的 Vite dev server
+# （http://localhost:5173/admin/）提供服务。
 if dist_dir.exists():
-    static_source = dist_dir
-elif webui_dir.exists():
-    static_source = webui_dir
-
-if static_source:
-    app.mount("/admin", StaticFiles(directory=static_source, html=True), name="admin")
+    app.mount("/admin", StaticFiles(directory=dist_dir, html=True), name="admin")
 
 
 @app.get("/")
