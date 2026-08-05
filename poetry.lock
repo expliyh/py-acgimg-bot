@@ -367,20 +367,23 @@ tests-no-zope = ["attrs[tests-mypy]", "cloudpickle ; platform_python_implementat
 
 [[package]]
 name = "b2sdk"
-version = "2.8.0"
+version = "2.12.0"
 description = "Backblaze B2 SDK"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "b2sdk-2.8.0-py3-none-any.whl", hash = "sha256:770ba282e64b9f288f7255358108d0771a6329a260ddc66a4688ae328bd9ec76"},
-    {file = "b2sdk-2.8.0.tar.gz", hash = "sha256:e5a75b20b37b45d17fdb7fae491c8bb5d8adac67d99383cda3506f6b10c96710"},
+    {file = "b2sdk-2.12.0-py3-none-any.whl", hash = "sha256:58af4e925b2ed0422b4f2f26ee3f53c7045520ae6ddcbe65b5bc9e4b99725bce"},
+    {file = "b2sdk-2.12.0.tar.gz", hash = "sha256:da7b65e1af4f59c7de7d079c1e25de6b033aa45090fded4caefe52ded9b13ee6"},
 ]
 
 [package.dependencies]
-annotated_types = ">=0.5.0"
+annotated-types = ">=0.5.0"
 logfury = ">=1.0.1,<2.0.0"
-requests = ">=2.9.1,<3.0.0"
+requests = ">=2.33.0,<3.0.0"
+
+[package.extras]
+full = ["pydantic (>=2.0.1) ; platform_python_implementation != \"PyPy\" or python_version >= \"3.11\"", "pydantic (>=2.0.1,<2.13) ; platform_python_implementation == \"PyPy\" and python_version < \"3.11\"", "tqdm (>=4.5.0,<5.0.0)"]
 
 [[package]]
 name = "cachetools"
@@ -1584,25 +1587,25 @@ xxhash = ["xxhash (>=3.6.0,<3.7.0)"]
 
 [[package]]
 name = "requests"
-version = "2.31.0"
+version = "2.34.2"
 description = "Python HTTP for Humans."
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "requests-2.31.0-py3-none-any.whl", hash = "sha256:58cd2187c01e70e6e26505bca751777aa9f2ee0b7f4300988b709f44e013003f"},
-    {file = "requests-2.31.0.tar.gz", hash = "sha256:942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1"},
+    {file = "requests-2.34.2-py3-none-any.whl", hash = "sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0"},
+    {file = "requests-2.34.2.tar.gz", hash = "sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed"},
 ]
 
 [package.dependencies]
-certifi = ">=2017.4.17"
-charset-normalizer = ">=2,<4"
+certifi = ">=2023.5.7"
+charset_normalizer = ">=2,<4"
 idna = ">=2.5,<4"
-urllib3 = ">=1.21.1,<3"
+urllib3 = ">=1.26,<3"
 
 [package.extras]
 socks = ["PySocks (>=1.5.6,!=1.5.7)"]
-use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
+use-chardet-on-py3 = ["chardet (>=3.0.2,<8)"]
 
 [[package]]
 name = "requests-toolbelt"
@@ -1997,4 +2000,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "f2ee0f41f2a4887b80a4a456750ae921fe81ba1ba815cea6b4689da803e02835"
+content-hash = "ae58664a38dcbf6f2ac973489d096c5bf6890bfb23a756cbe99dfab3e7072a47"
