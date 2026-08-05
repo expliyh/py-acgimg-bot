@@ -1,4 +1,4 @@
-﻿name: PR CI (Poetry)
+name: PR CI (Poetry)
 
 on:
   pull_request:
@@ -15,10 +15,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: .github/scripts/install-system-deps.sh
