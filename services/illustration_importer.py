@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from io import BytesIO
-from typing import Sequence
+from typing import Awaitable, Callable, Sequence
 
 from telegram import Bot
 from telegram.error import TelegramError
@@ -140,6 +140,7 @@ async def import_illustration(
     bot: Bot | None = None,
     telegram_chat_ids: Sequence[int] | None = None,
     cleanup_messages: bool = True,
+    on_page_done: Callable[[int], Awaitable[None]] | None = None,
 ) -> IllustrationImportResult:
     if not pixiv.enabled:
         raise RuntimeError("Pixiv 功能未启用")
@@ -240,6 +241,9 @@ async def import_illustration(
                 original_file_id=original_id,
             )
         )
+
+        if on_page_done is not None:
+            await on_page_done(page_index + 1)
 
     saved = await illust_registry.save_illustration(illust)
     saved.file_urls = illust.file_urls

@@ -176,6 +176,88 @@ export interface FeatureFlagResponse {
   placeholders: FeatureFlag[];
 }
 
+export interface BotTokenInfo {
+  configured: boolean;
+  token: string | null;
+  masked: string | null;
+  enabled: boolean | null;
+}
+
+export interface PixivTokenItem {
+  id: number;
+  token: string;
+  masked: string;
+  enabled: boolean;
+}
+
+export interface PixivTokenListResponse {
+  total: number;
+  items: PixivTokenItem[];
+}
+
+export interface IllustrationPreview {
+  id: string;
+  title: string | null;
+  author_id: string;
+  author_name: string | null;
+  page_count: number;
+  sanity_level: number;
+  r18g: boolean;
+  x_restrict: number;
+  tags: string[];
+  caption: string | null;
+  is_ai: boolean;
+  exists: boolean;
+  preview_urls: string[];
+}
+
+export interface IllustrationImportPayload {
+  pixiv_id: number;
+  title?: string | null;
+  caption?: string | null;
+  tags?: string[] | null;
+  sanity_level?: number | null;
+  r18g?: boolean | null;
+  is_ai?: boolean | null;
+}
+
+export interface ImportedPageInfo {
+  index: number;
+  storage_url: string;
+  compressed_file_id: string | null;
+  original_file_id: string | null;
+}
+
+export interface IllustrationImportResult {
+  id: string;
+  title: string | null;
+  author_id: string;
+  author_name: string | null;
+  page_count: number;
+  created: boolean;
+  telegram_cache_enabled: boolean;
+  pages: ImportedPageInfo[];
+}
+
+export interface IllustrationImportTask {
+  id: number;
+  pixiv_id: string;
+  title: string | null;
+  status: 'pending' | 'running' | 'success' | 'failed';
+  created: boolean | null;
+  total_pages: number | null;
+  current_page: number | null;
+  error_message: string | null;
+  result: IllustrationImportResult | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface IllustrationImportTaskListResponse {
+  total: number;
+  items: IllustrationImportTask[];
+}
+
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   const { data } = await client.get<DashboardSummary>('/dashboard/summary');
   return data;
@@ -238,5 +320,87 @@ export async function listCommandHistory(
   params: CommandHistoryQuery
 ): Promise<CommandHistoryResponse> {
   const { data } = await client.get<CommandHistoryResponse>('/commands/history', { params });
+  return data;
+}
+
+export async function fetchBotToken(): Promise<BotTokenInfo> {
+  const { data } = await client.get<BotTokenInfo>('/bot-tokens');
+  return data;
+}
+
+export async function setBotToken(token: string, enabled: boolean): Promise<BotTokenInfo> {
+  const { data } = await client.put<BotTokenInfo>('/bot-tokens', { token, enabled });
+  return data;
+}
+
+export async function setBotTokenEnabled(enabled: boolean): Promise<BotTokenInfo> {
+  const { data } = await client.patch<BotTokenInfo>('/bot-tokens/status', { enabled });
+  return data;
+}
+
+export async function deleteBotToken(): Promise<BotTokenInfo> {
+  const { data } = await client.delete<BotTokenInfo>('/bot-tokens');
+  return data;
+}
+
+export async function reloadBotToken(): Promise<BotTokenInfo> {
+  const { data } = await client.post<BotTokenInfo>('/bot-tokens/reload');
+  return data;
+}
+
+export async function listPixivTokens(): Promise<PixivTokenListResponse> {
+  const { data } = await client.get<PixivTokenListResponse>('/pixiv-tokens');
+  return data;
+}
+
+export async function addPixivToken(token: string, enabled: boolean): Promise<PixivTokenItem> {
+  const { data } = await client.post<PixivTokenItem>('/pixiv-tokens', { token, enabled });
+  return data;
+}
+
+export async function updatePixivToken(id: number, token: string): Promise<PixivTokenItem> {
+  const { data } = await client.put<PixivTokenItem>(`/pixiv-tokens/${id}`, { token, enabled: true });
+  return data;
+}
+
+export async function setPixivTokenEnabled(id: number, enabled: boolean): Promise<PixivTokenItem> {
+  const { data } = await client.patch<PixivTokenItem>(`/pixiv-tokens/${id}/status`, { enabled });
+  return data;
+}
+
+export async function setAllPixivTokensEnabled(enabled: boolean): Promise<PixivTokenListResponse> {
+  const { data } = await client.patch<PixivTokenListResponse>('/pixiv-tokens/enabled', { enabled });
+  return data;
+}
+
+export async function deletePixivToken(id: number): Promise<PixivTokenItem> {
+  const { data } = await client.delete<PixivTokenItem>(`/pixiv-tokens/${id}`);
+  return data;
+}
+
+export async function reloadPixivTokens(): Promise<PixivTokenListResponse> {
+  const { data } = await client.post<PixivTokenListResponse>('/pixiv-tokens/reload');
+  return data;
+}
+
+export async function previewIllustration(pixivId: number): Promise<IllustrationPreview> {
+  const { data } = await client.post<IllustrationPreview>('/illustrations/preview', { pixiv_id: pixivId });
+  return data;
+}
+
+export async function importIllustration(
+  payload: IllustrationImportPayload
+): Promise<IllustrationImportTask> {
+  const { data } = await client.post<IllustrationImportTask>('/illustrations/import', payload);
+  return data;
+}
+
+export async function listIllustrationTasks(limit = 20): Promise<IllustrationImportTaskListResponse> {
+  const { data } = await client.get<IllustrationImportTaskListResponse>('/illustrations/tasks', { params: { limit } });
+  return data;
+}
+
+export async function getIllustrationTask(taskId: number): Promise<IllustrationImportTask> {
+  const { data } = await client.get<IllustrationImportTask>(`/illustrations/tasks/${taskId}`);
   return data;
 }

@@ -33,6 +33,21 @@ const router = createRouter({
       component: () => import('@/views/FeatureConfigView.vue')
     },
     {
+      path: '/bot-tokens',
+      name: 'bot-tokens',
+      component: () => import('@/views/BotTokensView.vue')
+    },
+    {
+      path: '/pixiv-tokens',
+      name: 'pixiv-tokens',
+      component: () => import('@/views/PixivTokensView.vue')
+    },
+    {
+      path: '/illustrations/import',
+      name: 'illustration-import',
+      component: () => import('@/views/IllustrationImportView.vue')
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/dashboard'
     }

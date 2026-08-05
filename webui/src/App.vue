@@ -13,7 +13,10 @@ const navItems = [
   { label: '群组管理', icon: 'pi pi-users', to: '/groups' },
   { label: '私聊管理', icon: 'pi pi-comments', to: '/private' },
   { label: '命令历史', icon: 'pi pi-list', to: '/commands' },
-  { label: '功能配置', icon: 'pi pi-sliders-h', to: '/features' }
+  { label: '功能配置', icon: 'pi pi-sliders-h', to: '/features' },
+  { label: 'Bot Token', icon: 'pi pi-key', to: '/bot-tokens' },
+  { label: 'Pixiv Token', icon: 'pi pi-palette', to: '/pixiv-tokens' },
+  { label: '插画导入', icon: 'pi pi-upload', to: '/illustrations/import' }
 ];
 
 const activePath = computed(() => route.path);

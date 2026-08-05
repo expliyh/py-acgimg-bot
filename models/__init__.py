@@ -13,3 +13,4 @@ from .group_guard import (
     GroupGuardKeywordRule,
     GroupGuardPendingVerification,
 )
+from .illustration_import_task import IllustrationImportTask
