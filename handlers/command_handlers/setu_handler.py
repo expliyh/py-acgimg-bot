@@ -5,7 +5,7 @@ from io import BytesIO
 from typing import Sequence
 
 from telegram import Update
-from telegram.error import TelegramError
+from telegram.error import TelegramError, TimedOut
 from telegram.ext import ContextTypes
 
 from defines import GroupStatus, UserStatus
@@ -149,7 +149,13 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 reply_to_message_id=reply_to_id,
             )
             return
-        raise
+        await _reply_with_text(
+            context,
+            chat_id=chat_id,
+            text="数据库中没有符合条件的插画，请稍后再试。",
+            reply_to_message_id=reply_to_id,
+        )
+        return
 
     illust = resource.illustration
     caption_lines = [
@@ -185,6 +191,12 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if resource.file_id:
         try:
             sent_message = await context.bot.send_photo(photo=resource.file_id, **send_kwargs)
+        except TimedOut as exc:
+            # 请求超时但消息可能已送达，不重发避免重复
+            logger.warning(
+                "send_photo timed out (message may have been delivered): %s", exc
+            )
+            return
         except TelegramError as exc:
             logger.warning("Failed to reuse cached photo %s: %s", resource.file_id, exc)
             ids = ensure_list_length(getattr(illust, "compressed_file_ids", None), illust.page_count)
@@ -224,7 +236,14 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     image_file = BytesIO(file_bytes)
     image_file.name = resource.filename
-    sent_message = await context.bot.send_photo(photo=image_file, **send_kwargs)
+    try:
+        sent_message = await context.bot.send_photo(photo=image_file, **send_kwargs)
+    except TimedOut as exc:
+        # 请求超时但消息可能已送达，不重发避免重复
+        logger.warning(
+            "send_photo timed out (message may have been delivered): %s", exc
+        )
+        return
 
     if request_state is not None:
         request_state.message_id = sent_message.id

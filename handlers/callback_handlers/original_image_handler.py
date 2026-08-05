@@ -4,7 +4,7 @@ import logging
 from io import BytesIO
 
 from telegram import Update
-from telegram.error import TelegramError
+from telegram.error import TelegramError, TimedOut
 from telegram.ext import ContextTypes
 
 from registries import illust_registry
@@ -109,6 +109,12 @@ async def _send_original_image(bot, resource: ImageResource, chat_id: int) -> No
     if resource.file_id:
         try:
             await bot.send_document(chat_id=chat_id, document=resource.file_id)
+        except TimedOut as exc:
+            # 请求超时但消息可能已送达，不重发避免重复
+            logger.warning(
+                "send_document timed out (message may have been delivered): %s", exc
+            )
+            return
         except TelegramError as exc:
             logger.warning(
                 "Failed to reuse cached original file %s: %s",

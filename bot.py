@@ -57,7 +57,14 @@ class TelegramBot:
 
         await self._shutdown()
 
-        self.tg_app = ApplicationBuilder().token(token_value).build()
+        self.tg_app = (
+            ApplicationBuilder()
+            .token(token_value)
+            # 发送大图时 5s 默认 read 超时太短，容易误报 TimedOut（实际已送达）
+            .read_timeout(20)
+            .connect_timeout(10)
+            .build()
+        )
         self.tg_app.add_handler(CommandHandler("start", start))
         self.tg_app.add_handlers(all_handlers)
 
