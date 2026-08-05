@@ -184,6 +184,59 @@ async def get_bot_tokens() -> list[Token]:
     ]
 
 
+async def get_bot_token() -> Token | None:
+    """Return the configured bot token, or None when not configured."""
+    config = await get_config_detail("bot_token")
+    if config is None or config.value_str is None:
+        return None
+    return Token(
+        token=config.value_str or "",
+        enable=True if config.value_bool is None else bool(config.value_bool),
+        id=None,
+    )
+
+
+async def set_bot_token(token: str, *, enabled: bool = True) -> Token:
+    """Set or replace the bot token and its enabled flag."""
+    normalized = _optional_str(token)
+    if not normalized:
+        raise ValueError("Bot token cannot be empty")
+
+    async with engine.new_session() as session:
+        record = await session.get(Config, "bot_token")
+        if record is None:
+            record = Config(key="bot_token")
+            session.add(record)
+        record.value_str = normalized
+        record.value_bool = enabled
+        await session.commit()
+        await session.refresh(record)
+        return Token(
+            token=record.value_str or "",
+            enable=True if record.value_bool is None else bool(record.value_bool),
+            id=None,
+        )
+
+
+async def set_bot_token_enabled(enabled: bool) -> None:
+    """Toggle the enabled flag of the configured bot token."""
+    async with engine.new_session() as session:
+        record = await session.get(Config, "bot_token")
+        if record is None or record.value_str is None:
+            raise ValueError("Bot token is not configured")
+        record.value_bool = enabled
+        await session.commit()
+
+
+async def delete_bot_token() -> None:
+    """Remove the bot token configuration entirely."""
+    async with engine.new_session() as session:
+        record = await session.get(Config, "bot_token")
+        if record is not None:
+            await session.delete(record)
+            await session.commit()
+
+
 async def get_pixiv_tokens() -> list[Token]:
     async with engine.new_session() as session:
         result = await session.execute(select(PixivToken).order_by(PixivToken.id))
