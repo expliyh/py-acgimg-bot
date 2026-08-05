@@ -12,7 +12,7 @@
     "axios": "^1.19.0",
     "primeflex": "^4.0.0",
     "primeicons": "^8.0.0",
-    "primevue": "^3.52.0",
+    "primevue": "^5.0.0",
     "vue": "^3.4.15",
     "vue-router": "^5.2.0"
   },
