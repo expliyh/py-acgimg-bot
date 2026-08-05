@@ -997,23 +997,25 @@ files = [
 
 [[package]]
 name = "mariadb"
-version = "1.1.11"
+version = "1.1.14"
 description = "Python MariaDB extension"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "mariadb-1.1.11-cp310-cp310-win32.whl", hash = "sha256:dbc4cf0e302ca82d46f9431a0b04f048e9c21ee56d6f3162c29605f84d63b40c"},
-    {file = "mariadb-1.1.11-cp310-cp310-win_amd64.whl", hash = "sha256:579420293fa790d5ae0a6cb4bdb7e8be8facc2ceefb6123c2b0e8042b3fa725d"},
-    {file = "mariadb-1.1.11-cp311-cp311-win32.whl", hash = "sha256:0f8de8d66ca71bd102f34a970a331b7d75bdf7f8050d80e37cdcc6ff3c85cf7a"},
-    {file = "mariadb-1.1.11-cp311-cp311-win_amd64.whl", hash = "sha256:3f64b520089cb60c4f8302f365ed0ae057c4c859ab70fc8b1c4358192c3c8f27"},
-    {file = "mariadb-1.1.11-cp312-cp312-win32.whl", hash = "sha256:f6dfdc954edf02b6519419a054798cda6034dc459d1d482e3329e37aa27d34f0"},
-    {file = "mariadb-1.1.11-cp312-cp312-win_amd64.whl", hash = "sha256:2e72ea65f1d7d8563ee84e172f2a583193092bdb6ff83c470ca9722873273ecc"},
-    {file = "mariadb-1.1.11-cp313-cp313-win32.whl", hash = "sha256:d7302ccd15f0beee7b286885cbf6ac71ddc240374691d669784d99f89ba34d79"},
-    {file = "mariadb-1.1.11-cp313-cp313-win_amd64.whl", hash = "sha256:c1992ebf9c6f012ac158e33fef9f2c4ba899f721064c4ae3a3489233793296c0"},
-    {file = "mariadb-1.1.11-cp39-cp39-win32.whl", hash = "sha256:6f28d8ccc597a3a1368be14078110f743900dbb3b0c7f1cce3072d83bec59c8a"},
-    {file = "mariadb-1.1.11-cp39-cp39-win_amd64.whl", hash = "sha256:e94f1738bec09c97b601ddbb1908eb24524ba4630f507a775d82ffdb6c5794b3"},
-    {file = "mariadb-1.1.11.tar.gz", hash = "sha256:cf6647cee081e21d0994b409ba8c8fa2077f3972f1de3627c5502fb31d14f806"},
+    {file = "mariadb-1.1.14-cp310-cp310-win32.whl", hash = "sha256:4c7f33578da163a1b79929aae241f5f981d7b9d5a94d89e589aad7ec58e313ea"},
+    {file = "mariadb-1.1.14-cp310-cp310-win_amd64.whl", hash = "sha256:3f6fdc4ded5e0500a6a29bf0c8bf1be94189dcef5a8d5e0e154a4b3456f86bcc"},
+    {file = "mariadb-1.1.14-cp311-cp311-win32.whl", hash = "sha256:932a95016b7e9b8d78893aa5ee608e74199e3c6dd607dbe5e4da2010a4f67b88"},
+    {file = "mariadb-1.1.14-cp311-cp311-win_amd64.whl", hash = "sha256:55ddbe5272c292cbcb2968d87681b5d2b327e65646a015e324b8eeb804d14531"},
+    {file = "mariadb-1.1.14-cp312-cp312-win32.whl", hash = "sha256:98d552a8bb599eceaa88f65002ad00bd88aeed160592c273a7e5c1d79ab733dd"},
+    {file = "mariadb-1.1.14-cp312-cp312-win_amd64.whl", hash = "sha256:685a1ad2a24fd0aae1c4416fe0ac794adc84ab9209c8d0c57078f770d39731db"},
+    {file = "mariadb-1.1.14-cp313-cp313-win32.whl", hash = "sha256:3d2c795cde606f4e12c0d73282b062433f414cae035675b0d81f2d65c9b79ac5"},
+    {file = "mariadb-1.1.14-cp313-cp313-win_amd64.whl", hash = "sha256:7fd603c5cf23c47ef0d28fdc2b4b79919ee7f75d00ed070d3cd1054dcf816aeb"},
+    {file = "mariadb-1.1.14-cp314-cp314-win32.whl", hash = "sha256:1a50b4612c0dd5b69690cebb34cef552a7f64dcadeb5aa91d70cd99bf01bc5b3"},
+    {file = "mariadb-1.1.14-cp314-cp314-win_amd64.whl", hash = "sha256:6659725837e48fa6af05e20128fb525029f706f1921d5dbf639a25b2f80b9f93"},
+    {file = "mariadb-1.1.14-cp39-cp39-win32.whl", hash = "sha256:0f5fc74023f2e479be159542633f8b5865fee18a36e5a6d4e262387b39a692ee"},
+    {file = "mariadb-1.1.14-cp39-cp39-win_amd64.whl", hash = "sha256:5b514362ba3ad3ef7ada91bc8a8b3b4c0e5144efce96b5bffa3dbc46b8af7d7a"},
+    {file = "mariadb-1.1.14.tar.gz", hash = "sha256:e6d702a53eccf20922e47f2f45cfb5c7a0c2c6c0a46e4ee2d8a80d0ff4a52f34"},
 ]
 
 [package.dependencies]
@@ -1995,4 +1997,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "03814260fca34466de10bb6797e19970103ba5fe35d74559bf7ee810523231e4"
+content-hash = "f2ee0f41f2a4887b80a4a456750ae921fe81ba1ba815cea6b4689da803e02835"
