@@ -35,6 +35,11 @@ async def ensure_schema_migrations(async_engine: AsyncEngine) -> None:
     table_name = f"{file_config.db_prefix}schema_migrations"
     async with async_engine.begin() as conn:
         await _ensure_version_table(conn, table_name)
+
+        # SQLite 建库即使用当前最新的 schema，历史 MySQL 迁移不适用。
+        if conn.dialect.name == "sqlite":
+            return
+
         current_version = await _get_current_version(conn, table_name)
 
         for migration in sorted(_MIGRATIONS, key=lambda m: m.version):
@@ -59,7 +64,7 @@ async def _ensure_version_table(conn: AsyncConnection, table_name: str) -> None:
             CREATE TABLE IF NOT EXISTS {quoted_table} (
                 version INT NOT NULL PRIMARY KEY,
                 applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB
+            )
             """
         )
     )
@@ -76,16 +81,17 @@ async def _get_current_version(conn: AsyncConnection, table_name: str) -> int:
 async def _record_migration(
     conn: AsyncConnection, table_name: str, version: int
 ) -> None:
-    await conn.execute(
-        text(
-            f"""
-            INSERT INTO {_quote(table_name)} (version)
-            VALUES (:version)
-            ON DUPLICATE KEY UPDATE applied_at = CURRENT_TIMESTAMP
-            """
-        ),
-        {"version": version},
-    )
+    if conn.dialect.name == "sqlite":
+        upsert_sql = (
+            f"INSERT INTO {_quote(table_name)} (version) VALUES (:version) "
+            "ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP"
+        )
+    else:
+        upsert_sql = (
+            f"INSERT INTO {_quote(table_name)} (version) VALUES (:version) "
+            "ON DUPLICATE KEY UPDATE applied_at = CURRENT_TIMESTAMP"
+        )
+    await conn.execute(text(upsert_sql), {"version": version})
 
 
 async def _expand_telegram_ids(conn: AsyncConnection) -> None:
