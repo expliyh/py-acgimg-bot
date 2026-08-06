@@ -57,8 +57,15 @@ jobs:
               per_page: 100,
             });
             const addedLines = new Map();
+            let missingSourcePatches = 0;
             for (const file of files) {
-              if (!file.patch) continue;
+              if (!file.patch) {
+                // The files API can omit patches for large diffs. Do not present
+                // partial new-code coverage as complete when this is source that
+                // pytest-cov measured.
+                if (coverage.files[file.filename]) missingSourcePatches++;
+                continue;
+              }
               const lines = new Set();
               let newLine = 0;
               for (const line of file.patch.split('\n')) {
@@ -96,9 +103,11 @@ jobs:
             const percentage = (covered, total) => total
               ? `${(covered / total * 100).toFixed(2)}%`
               : 'N/A';
-            const addedCoverage = addedStatements
-              ? `${coveredAddedStatements} / ${addedStatements} (${percentage(coveredAddedStatements, addedStatements)})`
-              : 'N/A (no executable lines added)';
+            const addedCoverage = missingSourcePatches
+              ? `N/A (incomplete: GitHub omitted ${missingSourcePatches} source ${missingSourcePatches === 1 ? 'patch' : 'patches'})`
+              : addedStatements
+                ? `${coveredAddedStatements} / ${addedStatements} (${percentage(coveredAddedStatements, addedStatements)})`
+                : 'N/A (no executable lines added)';
             const branchCoverage = branches
               ? `${coveredBranches} / ${branches} (${percentage(coveredBranches, branches)})`
               : 'N/A';
