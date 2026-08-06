@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
 
 from telegram import Update, Bot
 
@@ -30,6 +29,7 @@ from registries.config_registry import init_database_config
 from services import pixiv, storage_service, schema_migrator
 from utils.logging_config import setup_logging
 from utils import frontend_launcher
+from utils.admin_static import AdminStaticFiles
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ dist_dir = webui_dir / "dist"
 # 仅在生产构建产物存在时挂载 /admin；开发模式下由自动启动的 Vite dev server
 # （http://localhost:5173/admin/）提供服务。
 if dist_dir.exists():
-    app.mount("/admin", StaticFiles(directory=dist_dir, html=True), name="admin")
+    app.mount("/admin", AdminStaticFiles(directory=dist_dir, html=True), name="admin")
 
 
 @app.get("/")

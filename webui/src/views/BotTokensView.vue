@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import Card from 'primevue/card';
-import InputSwitch from 'primevue/inputswitch';
+import InputSwitch from 'primevue/toggleswitch';
 import Tag from 'primevue/tag';
 import Button from 'primevue/button';
 import Toast from 'primevue/toast';

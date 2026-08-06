@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue';
 import Dialog from 'primevue/dialog';
-import InputSwitch from 'primevue/inputswitch';
-import Dropdown from 'primevue/dropdown';
+import InputSwitch from 'primevue/toggleswitch';
+import Dropdown from 'primevue/select';
 import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 import Divider from 'primevue/divider';

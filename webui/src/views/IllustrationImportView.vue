@@ -5,7 +5,7 @@ import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import Textarea from 'primevue/textarea';
 import InputNumber from 'primevue/inputnumber';
-import InputSwitch from 'primevue/inputswitch';
+import InputSwitch from 'primevue/toggleswitch';
 import Tag from 'primevue/tag';
 import Chip from 'primevue/chip';
 import ProgressBar from 'primevue/progressbar';

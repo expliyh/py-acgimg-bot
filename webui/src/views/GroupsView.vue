@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import InputText from 'primevue/inputtext';
-import Dropdown from 'primevue/dropdown';
+import Dropdown from 'primevue/select';
 import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 import Toast from 'primevue/toast';

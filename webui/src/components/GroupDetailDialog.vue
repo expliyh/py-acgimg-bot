@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue';
 import Dialog from 'primevue/dialog';
-import InputSwitch from 'primevue/inputswitch';
-import Dropdown from 'primevue/dropdown';
-import Chips from 'primevue/chips';
+import InputSwitch from 'primevue/toggleswitch';
+import Dropdown from 'primevue/select';
+import Chips from 'primevue/inputtags';
 import Button from 'primevue/button';
 import Divider from 'primevue/divider';
 import Tag from 'primevue/tag';
