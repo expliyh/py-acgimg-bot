@@ -1,4 +1,5 @@
 [tool.poetry]
+package-mode = false
 name = "py-acgimg-bot"
 version = "0.1.0"
 description = ""
@@ -32,3 +33,9 @@ build-backend = "poetry.core.masonry.api"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)",
+    "pytest-asyncio (>=1.4.0,<2.0.0)"
+]
