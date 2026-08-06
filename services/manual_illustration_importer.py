@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
+from io import BytesIO
+
+from PIL import Image, UnidentifiedImageError
 
 from models import Illustration
 from registries import illust_registry
@@ -11,12 +14,29 @@ from services.storage_service import use as use_storage
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "GIF", "WEBP"}
 
 
 @dataclass(slots=True)
 class ManualImportResult:
     illustration: Illustration
     storage_url: str
+
+
+def _validate_image_contents(data: bytes) -> None:
+    """Reject malformed data and formats that the application cannot serve."""
+    try:
+        with Image.open(BytesIO(data)) as image:
+            if image.format not in ALLOWED_IMAGE_FORMATS:
+                raise ValueError("仅支持 JPG、PNG、GIF 和 WebP 图片")
+            image.verify()
+    except (
+        Image.DecompressionBombError,
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+    ) as exc:
+        raise ValueError("图片文件已损坏或格式无效") from exc
 
 
 async def import_manual_illustration(
@@ -40,6 +60,7 @@ async def import_manual_illustration(
     ext = os.path.splitext(filename)[1].lower() or ".jpg"
     if ext not in ALLOWED_EXTENSIONS:
         raise ValueError("仅支持 JPG、PNG、GIF 和 WebP 图片")
+    _validate_image_contents(data)
     title = title.strip()
     if not title:
         raise ValueError("名称不能为空")
