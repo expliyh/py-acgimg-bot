@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
-import InputSwitch from 'primevue/inputswitch';
+import InputSwitch from 'primevue/toggleswitch';
 import Button from 'primevue/button';
 import Dialog from 'primevue/dialog';
 import InputText from 'primevue/inputtext';
