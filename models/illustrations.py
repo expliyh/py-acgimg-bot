@@ -26,20 +26,29 @@ class Illustration(Base):
     original_file_ids: [str | None] = Column(JSON, default=[], nullable=False, comment='插画的原始文件 ID')
     origin_urls: list = Column(JSON, default=[], nullable=False, comment='插画的原始链接')
     file_ext: [str] = Column(JSON, default=[], nullable=False, comment='插画的文件后缀')
+    source_type = Column(String(20), default="pixiv", nullable=False, comment='图片来源类型')
+    source_url = Column(Text, nullable=True, comment='自定义来源链接')
+    author_url = Column(Text, nullable=True, comment='自定义作者链接')
 
     def get_markdown(self) -> str:
+        author_url = self.author_url
+        if not author_url and self.source_type == "pixiv" and self.author_id:
+            author_url = f"https://www.pixiv.net/users/{self.author_id}"
+        author = self.author_name or "未知"
+        author_text = f"[{author}]({author_url})" if author_url else author
+        source_text = f"\n\n[来源]({self.source_url})" if self.source_url else ""
         if self.page_count == 1:
             return \
                 f"**{self.title}**\n\n" \
-                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n\n" \
+                f"作者: {author_text}\n\n" \
                 f"描述: {self.caption}\n\n" \
-                f"[原图]({self.origin_urls[0]})\n\n" \
+                f"[原图]({self.file_urls[0]}){source_text}\n\n" \
                 f"AI: {'是' if self.is_ai else '否'}"
 
         else:
             return \
                 f"**{self.title}**\n\n" \
-                f"作者: [{self.author_name}](https://www.pixiv.net/users/{self.author_id})\n\n" \
+                f"作者: {author_text}\n\n" \
                 f"描述: {self.caption}\n\n" \
                 f"原图: {', '.join([f'[{i + 1}]({self.origin_urls[i]})' for i in range(self.page_count)])}\n\n" \
                 f"AI: {'是' if self.is_ai else '否'}"

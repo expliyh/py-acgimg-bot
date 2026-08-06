@@ -258,6 +258,25 @@ export interface IllustrationImportTaskListResponse {
   items: IllustrationImportTask[];
 }
 
+export interface ManualIllustrationPayload {
+  image: File;
+  title: string;
+  author_name?: string;
+  source_url?: string;
+  author_url?: string;
+  caption?: string;
+  tags?: string;
+  is_ai: boolean;
+  is_r18: boolean;
+  is_r18g: boolean;
+}
+
+export interface ManualIllustrationResult {
+  id: string;
+  title: string;
+  storage_url: string;
+}
+
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   const { data } = await client.get<DashboardSummary>('/dashboard/summary');
   return data;
@@ -402,5 +421,16 @@ export async function listIllustrationTasks(limit = 20): Promise<IllustrationImp
 
 export async function getIllustrationTask(taskId: number): Promise<IllustrationImportTask> {
   const { data } = await client.get<IllustrationImportTask>(`/illustrations/tasks/${taskId}`);
+  return data;
+}
+
+export async function importManualIllustration(
+  payload: ManualIllustrationPayload
+): Promise<ManualIllustrationResult> {
+  const body = new FormData();
+  Object.entries(payload).forEach(([key, value]) => body.append(key, value instanceof File ? value : String(value)));
+  const { data } = await client.post<ManualIllustrationResult>('/illustrations/manual', body, {
+    timeout: 30000
+  });
   return data;
 }

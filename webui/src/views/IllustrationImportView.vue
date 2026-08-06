@@ -27,7 +27,8 @@ import {
   previewIllustration,
   importIllustration,
   listIllustrationTasks,
-  getIllustrationTask
+  getIllustrationTask,
+  importManualIllustration
 } from '@/services/api';
 
 const toast = useToast();
@@ -37,6 +38,44 @@ const pixivIdInput = ref<number | null>(null);
 const loadingPreview = ref(false);
 const importing = ref(false);
 const preview = ref<IllustrationPreview | null>(null);
+const manualFile = ref<File | null>(null);
+const manualTitle = ref('');
+const manualAuthor = ref('');
+const manualSourceUrl = ref('');
+const manualAuthorUrl = ref('');
+const manualCaption = ref('');
+const manualTags = ref('');
+const manualAi = ref(false);
+const manualR18 = ref(false);
+const manualR18g = ref(false);
+const manualUploading = ref(false);
+
+function chooseManualFile(event: Event) {
+  manualFile.value = (event.target as HTMLInputElement).files?.[0] ?? null;
+}
+
+async function submitManual() {
+  if (!manualFile.value || !manualTitle.value.trim()) {
+    toast.add({ severity: 'warn', summary: '信息不完整', detail: '请选择图片并填写名称。', life: 3000 });
+    return;
+  }
+  manualUploading.value = true;
+  try {
+    const result = await importManualIllustration({
+      image: manualFile.value,
+      title: manualTitle.value.trim(),
+      author_name: manualAuthor.value.trim(), source_url: manualSourceUrl.value.trim(),
+      author_url: manualAuthorUrl.value.trim(), caption: manualCaption.value.trim(),
+      tags: manualTags.value.trim(), is_ai: manualAi.value, is_r18: manualR18.value, is_r18g: manualR18g.value
+    });
+    toast.add({ severity: 'success', summary: '添加成功', detail: `${result.title}（${result.id}）已保存。`, life: 5000 });
+    manualFile.value = null; manualTitle.value = ''; manualAuthor.value = '';
+    manualSourceUrl.value = ''; manualAuthorUrl.value = ''; manualCaption.value = ''; manualTags.value = '';
+    manualAi.value = false; manualR18.value = false; manualR18g.value = false;
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: '添加失败', detail: error?.response?.data?.detail ?? '无法保存图片。', life: 5000 });
+  } finally { manualUploading.value = false; }
+}
 
 // 可编辑字段
 const editTitle = ref('');
@@ -305,6 +344,28 @@ onUnmounted(() => {
         输入 Pixiv ID 加载插画信息，可修改标题/描述/标签等字段后确认导入；导入在后台执行，进度显示在下方历史任务中。
       </p>
     </header>
+
+    <Card class="shadow-1">
+      <template #title>手动添加非 Pixiv 图片</template>
+      <template #subtitle>仅名称和图片为必填项；来源、作者及其链接均可留空。</template>
+      <template #content>
+        <div class="grid">
+          <div class="col-12 md:col-6 flex flex-column gap-2"><label>图片 *</label><input type="file" accept="image/jpeg,image/png,image/gif,image/webp" @change="chooseManualFile" /></div>
+          <div class="col-12 md:col-6 flex flex-column gap-2"><label>名称 *</label><InputText v-model="manualTitle" maxlength="64" /></div>
+          <div class="col-12 md:col-6 flex flex-column gap-2"><label>作者</label><InputText v-model="manualAuthor" /></div>
+          <div class="col-12 md:col-6 flex flex-column gap-2"><label>标签（逗号分隔）</label><InputText v-model="manualTags" /></div>
+          <div class="col-12 md:col-6 flex flex-column gap-2"><label>来源链接</label><InputText v-model="manualSourceUrl" type="url" placeholder="可留空" /></div>
+          <div class="col-12 md:col-6 flex flex-column gap-2"><label>作者链接</label><InputText v-model="manualAuthorUrl" type="url" placeholder="可留空" /></div>
+          <div class="col-12 flex flex-column gap-2"><label>描述</label><Textarea v-model="manualCaption" rows="2" /></div>
+          <div class="col-12 flex gap-4 flex-wrap">
+            <label class="flex align-items-center gap-2"><InputSwitch v-model="manualAi" /> AI</label>
+            <label class="flex align-items-center gap-2"><InputSwitch v-model="manualR18" /> R18</label>
+            <label class="flex align-items-center gap-2"><InputSwitch v-model="manualR18g" /> R18G</label>
+          </div>
+          <div class="col-12"><Button label="添加图片" icon="pi pi-upload" :loading="manualUploading" @click="submitManual" /></div>
+        </div>
+      </template>
+    </Card>
 
     <Card class="shadow-1">
       <template #content>

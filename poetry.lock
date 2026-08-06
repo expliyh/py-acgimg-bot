@@ -1962,6 +1962,18 @@ files = [
 cli = ["click (>=5.0)"]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.22"
+description = "A streaming multipart parser for Python"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "python_multipart-0.0.22-py3-none-any.whl", hash = "sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155"},
+    {file = "python_multipart-0.0.22.tar.gz", hash = "sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58"},
+]
+
+[[package]]
 name = "python-telegram-bot"
 version = "22.8"
 description = "We have made you a wrapper you can't refuse"
@@ -2432,4 +2444,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "50686ec944a77775e4bfdd15a739f1060d382ca4770f6b6e62765cf9ba40ef9f"
+content-hash = "48bf021f02b6440bc9f7f70d49742984a6a84f12d7a5c32ec2bbb3f56093bde0"

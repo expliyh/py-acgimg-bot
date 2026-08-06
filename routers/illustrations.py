@@ -10,7 +10,7 @@ import os
 from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from datetime import datetime
@@ -24,8 +24,54 @@ from services.illustration_import_runner import (
     get_import_task,
     list_import_tasks,
 )
+from services.manual_illustration_importer import import_manual_illustration
 
 router = APIRouter(prefix="/api/illustrations", tags=["illustrations"])
+
+
+class ManualIllustrationResponse(BaseModel):
+    id: str
+    title: str
+    storage_url: str
+
+
+@router.post("/manual", response_model=ManualIllustrationResponse)
+async def create_manual_illustration(
+    image: UploadFile = File(...),
+    title: str = Form(..., min_length=1, max_length=64),
+    author_name: str | None = Form(None, max_length=64),
+    source_url: str | None = Form(None),
+    author_url: str | None = Form(None),
+    caption: str | None = Form(None),
+    tags: str | None = Form(None),
+    is_ai: bool = Form(False),
+    is_r18: bool = Form(False),
+    is_r18g: bool = Form(False),
+) -> ManualIllustrationResponse:
+    """Store a non-Pixiv image submitted from the administrator console."""
+    try:
+        result = await import_manual_illustration(
+            await image.read(),
+            filename=image.filename or "image.jpg",
+            title=title,
+            author_name=author_name,
+            source_url=source_url,
+            author_url=author_url,
+            caption=caption,
+            tags=[item.strip() for item in (tags or "").replace("，", ",").split(",") if item.strip()],
+            is_ai=is_ai,
+            is_r18=is_r18,
+            is_r18g=is_r18g,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ManualIllustrationResponse(
+        id=result.illustration.id,
+        title=result.illustration.title or result.illustration.id,
+        storage_url=result.storage_url,
+    )
 
 _PIXIV_CDN_HOST = "i.pximg.net"
 _PIXIV_CDN_ORIGIN = f"https://{_PIXIV_CDN_HOST}"
