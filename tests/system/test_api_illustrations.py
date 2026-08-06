@@ -123,6 +123,23 @@ def test_manual_import_accepts_optional_metadata(client, monkeypatch):
     assert captured["data"] == b"png-data"
 
 
+def test_manual_import_maps_mocked_validation_error(client, monkeypatch):
+    """模拟导入服务拒绝文件，验证 HTTP 层不会把用户错误变成 500。"""
+
+    async def reject_manual(*args, **kwargs):
+        raise ValueError("仅支持 JPG、PNG、GIF 和 WebP 图片")
+
+    monkeypatch.setattr("routers.illustrations.import_manual_illustration", reject_manual)
+    response = client.post(
+        "/api/illustrations/manual",
+        files={"image": ("image.svg", b"<svg/>", "image/svg+xml")},
+        data={"title": "不支持的图片"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "仅支持 JPG、PNG、GIF 和 WebP 图片"}
+
+
 def test_task_list_and_missing_task(client, pixiv_enabled, monkeypatch):
     async def fake_import(pixiv_id, *, bot=None, telegram_chat_ids=None, cleanup_messages=True, on_page_done=None):
         if on_page_done is not None:
