@@ -7,7 +7,7 @@ user review/adjust fields, then confirm to download + store + persist.
 from __future__ import annotations
 
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Response
@@ -28,13 +28,20 @@ from services.illustration_import_runner import (
 router = APIRouter(prefix="/api/illustrations", tags=["illustrations"])
 
 _PIXIV_CDN_HOST = "i.pximg.net"
+_PIXIV_CDN_ORIGIN = f"https://{_PIXIV_CDN_HOST}"
 
 
-async def _fetch_pixiv_bytes(url: str) -> bytes:
+async def _fetch_pixiv_bytes(relative_url: str) -> bytes:
     timeout = aiohttp.ClientTimeout(total=15)
     headers = {"Referer": "https://app-api.pixiv.net/"}
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url, headers=headers) as response:
+    # Keep the network destination independent from request data.  Using a fixed
+    # base URL also makes the SSRF boundary explicit for static analysis.
+    async with aiohttp.ClientSession(
+        base_url=_PIXIV_CDN_ORIGIN, timeout=timeout
+    ) as session:
+        async with session.get(
+            relative_url, headers=headers, allow_redirects=False
+        ) as response:
             if response.status != 200:
                 raise HTTPException(
                     status_code=502, detail=f"获取图片失败：HTTP {response.status}"
@@ -228,17 +235,33 @@ async def preview_illustration(payload: PixivIdPayload) -> IllustrationPreviewRe
 @router.get("/image")
 async def proxy_image(url: str) -> Response:
     """Proxy a Pixiv CDN image (requires a referer header) for inline preview."""
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or parsed.netloc.lower() != _PIXIV_CDN_HOST:
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
         raise HTTPException(status_code=400, detail="仅允许代理 Pixiv CDN 图片")
 
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname is None
+        or parsed.hostname.lower() != _PIXIV_CDN_HOST
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or not parsed.path.startswith("/")
+        or parsed.path.startswith("//")
+    ):
+        raise HTTPException(status_code=400, detail="仅允许代理 Pixiv CDN 图片")
+
+    # Pass only the path and query to the HTTP client.  The scheme and authority
+    # are supplied by the trusted constant in _fetch_pixiv_bytes.
+    relative_url = urlunsplit(("", "", parsed.path, parsed.query, ""))
+
     try:
-        content = await _fetch_pixiv_bytes(url)
+        content = await _fetch_pixiv_bytes(relative_url)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"获取图片失败：{exc}")
 
     return Response(content=content, media_type=_guess_media_type(parsed.path))
-
-
