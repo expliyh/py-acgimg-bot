@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
 if ! command -v poetry >/dev/null 2>&1; then
   echo "Poetry is not installed; skipping the update."
   exit 0
