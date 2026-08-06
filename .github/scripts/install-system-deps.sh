@@ -6,3 +6,5 @@ sudo apt-get install -y \
   libmariadb-dev \
   libssl-dev \
   pkg-config
+
+"$(dirname "$0")/update-poetry.sh"
