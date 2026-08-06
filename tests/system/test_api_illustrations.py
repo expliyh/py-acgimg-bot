@@ -96,6 +96,72 @@ def test_import_requires_pixiv_enabled(client, pixiv_disabled):
     assert response.status_code == 400
 
 
+def test_manual_import_accepts_optional_metadata(client, monkeypatch):
+    from models import Illustration
+    from services.manual_illustration_importer import ManualImportResult
+
+    captured = {}
+
+    async def fake_manual(data, **kwargs):
+        captured.update(kwargs)
+        captured["data"] = data
+        illustration = Illustration(id="manual_123", title=kwargs["title"])
+        return ManualImportResult(illustration, "manual/manual_123/image.png")
+
+    monkeypatch.setattr("routers.illustrations.import_manual_illustration", fake_manual)
+    response = client.post(
+        "/api/illustrations/manual",
+        files={"image": ("image.png", b"png-data", "image/png")},
+        data={"title": "手动图片", "is_ai": "true", "is_r18": "true"},
+    )
+    assert response.status_code == 200
+    assert response.json()["id"] == "manual_123"
+    assert captured["title"] == "手动图片"
+    assert captured["author_name"] is None
+    assert captured["is_ai"] is True
+    assert captured["is_r18"] is True
+    assert captured["data"] == b"png-data"
+
+
+def test_manual_import_maps_mocked_validation_error(client, monkeypatch):
+    """模拟导入服务拒绝文件，验证 HTTP 层不会把用户错误变成 500。"""
+
+    async def reject_manual(*args, **kwargs):
+        raise ValueError("仅支持 JPG、PNG、GIF 和 WebP 图片")
+
+    monkeypatch.setattr("routers.illustrations.import_manual_illustration", reject_manual)
+    response = client.post(
+        "/api/illustrations/manual",
+        files={"image": ("image.svg", b"<svg/>", "image/svg+xml")},
+        data={"title": "不支持的图片"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "仅支持 JPG、PNG、GIF 和 WebP 图片"}
+
+
+def test_manual_import_bounds_upload_read(client, monkeypatch):
+    """Only read enough upload bytes for the importer to detect an oversize file."""
+
+    monkeypatch.setattr("routers.illustrations.MAX_IMAGE_BYTES", 8)
+
+    async def reject_oversize(data, **kwargs):
+        assert data == b"x" * 9
+        raise ValueError("图片不能超过 20 MB")
+
+    monkeypatch.setattr(
+        "routers.illustrations.import_manual_illustration", reject_oversize
+    )
+    response = client.post(
+        "/api/illustrations/manual",
+        files={"image": ("image.png", b"x" * 100, "image/png")},
+        data={"title": "过大的图片"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "图片不能超过 20 MB"}
+
+
 def test_task_list_and_missing_task(client, pixiv_enabled, monkeypatch):
     async def fake_import(pixiv_id, *, bot=None, telegram_chat_ids=None, cleanup_messages=True, on_page_done=None):
         if on_page_done is not None:

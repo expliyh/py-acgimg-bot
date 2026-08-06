@@ -5,7 +5,16 @@ uvicorn subprocess against an isolated SQLite database and talk to it over
 TCP with httpx.
 """
 
+import base64
+import shutil
 import uuid
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ONE_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 def test_health(live_server_url, http_client):
@@ -80,6 +89,38 @@ def test_illustration_import_requires_pixiv(live_server_url, http_client):
     # 真实服务器中 Pixiv 未配置 token → 400
     response = http_client.post("/api/illustrations/import", json={"pixiv_id": 1})
     assert response.status_code == 400
+
+
+def test_manual_illustration_upload_over_real_http(live_server_url, http_client):
+    """通过真实 uvicorn/TCP 请求，覆盖 multipart、存储和数据库写入链路。"""
+    title = f"Live manual image {uuid.uuid4().hex[:8]}"
+    response = http_client.post(
+        "/api/illustrations/manual",
+        files={"image": ("pixel.png", ONE_PIXEL_PNG, "image/png")},
+        data={
+            "title": title,
+            "author_name": "Live Tester",
+            "source_url": "https://example.com/source",
+            "author_url": "https://example.com/author",
+            "caption": "real HTTP upload",
+            "tags": "live,e2e",
+            "is_ai": "true",
+            "is_r18": "true",
+            "is_r18g": "false",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["id"].startswith("manual_")
+    assert result["title"] == title
+    assert result["storage_url"].endswith(f"/{result['id']}.png")
+
+    stored_file = PROJECT_ROOT / "storage" / result["storage_url"]
+    try:
+        assert stored_file.read_bytes() == ONE_PIXEL_PNG
+    finally:
+        shutil.rmtree(stored_file.parent, ignore_errors=True)
 
 
 def test_illustration_tasks_endpoint(live_server_url, http_client):

@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from configs import config as file_config
@@ -35,10 +35,6 @@ async def ensure_schema_migrations(async_engine: AsyncEngine) -> None:
     table_name = f"{file_config.db_prefix}schema_migrations"
     async with async_engine.begin() as conn:
         await _ensure_version_table(conn, table_name)
-
-        # SQLite 建库即使用当前最新的 schema，历史 MySQL 迁移不适用。
-        if conn.dialect.name == "sqlite":
-            return
 
         current_version = await _get_current_version(conn, table_name)
 
@@ -95,6 +91,8 @@ async def _record_migration(
 
 
 async def _expand_telegram_ids(conn: AsyncConnection) -> None:
+    if conn.dialect.name == "sqlite":
+        return
     schema = file_config.db_name
     prefix = file_config.db_prefix
 
@@ -125,6 +123,8 @@ async def _expand_telegram_ids(conn: AsyncConnection) -> None:
 
 
 async def _remove_auto_increment_flags(conn: AsyncConnection) -> None:
+    if conn.dialect.name == "sqlite":
+        return
     schema = file_config.db_name
     prefix = file_config.db_prefix
 
@@ -137,6 +137,23 @@ async def _remove_auto_increment_flags(conn: AsyncConnection) -> None:
             "id",
             allow_autoincrement=False,
         )
+
+
+async def _add_manual_illustration_metadata(conn: AsyncConnection) -> None:
+    table_name = f"{file_config.db_prefix}illustrations"
+    columns = await conn.run_sync(
+        lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns(table_name)}
+    )
+    definitions = {
+        "source_type": "VARCHAR(20) NOT NULL DEFAULT 'pixiv'",
+        "source_url": "TEXT NULL",
+        "author_url": "TEXT NULL",
+    }
+    for column, definition in definitions.items():
+        if column not in columns:
+            await conn.execute(
+                text(f"ALTER TABLE {_quote(table_name)} ADD COLUMN {_quote(column)} {definition}")
+            )
 
 
 async def _ensure_column_bigint(
@@ -240,5 +257,10 @@ _MIGRATIONS: tuple[Migration, ...] = (
         version=2,
         name="Remove AUTO_INCREMENT from Telegram ID columns",
         handler=_remove_auto_increment_flags,
+    ),
+    Migration(
+        version=3,
+        name="Add metadata columns for manually uploaded illustrations",
+        handler=_add_manual_illustration_metadata,
     ),
 )
