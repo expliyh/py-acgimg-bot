@@ -29,7 +29,7 @@ from registries.config_registry import init_database_config
 from services import pixiv, storage_service, schema_migrator
 from utils.logging_config import setup_logging
 from utils import frontend_launcher
-from utils.admin_static import AdminStaticFiles
+from utils.admin_static import AdminStaticFiles, redirect_to_admin
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -103,11 +103,11 @@ dist_dir = webui_dir / "dist"
 # （http://localhost:5173/admin/）提供服务。
 if dist_dir.exists():
     app.mount("/admin", AdminStaticFiles(directory=dist_dir, html=True), name="admin")
-
-
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
+    app.add_api_route("/", redirect_to_admin, include_in_schema=False)
+else:
+    @app.get("/")
+    async def root():
+        return {"message": "Hello World"}
 
 
 @app.get("/hello/{name}")
