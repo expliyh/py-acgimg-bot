@@ -140,6 +140,28 @@ def test_manual_import_maps_mocked_validation_error(client, monkeypatch):
     assert response.json() == {"detail": "仅支持 JPG、PNG、GIF 和 WebP 图片"}
 
 
+def test_manual_import_bounds_upload_read(client, monkeypatch):
+    """Only read enough upload bytes for the importer to detect an oversize file."""
+
+    monkeypatch.setattr("routers.illustrations.MAX_IMAGE_BYTES", 8)
+
+    async def reject_oversize(data, **kwargs):
+        assert data == b"x" * 9
+        raise ValueError("图片不能超过 20 MB")
+
+    monkeypatch.setattr(
+        "routers.illustrations.import_manual_illustration", reject_oversize
+    )
+    response = client.post(
+        "/api/illustrations/manual",
+        files={"image": ("image.png", b"x" * 100, "image/png")},
+        data={"title": "过大的图片"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "图片不能超过 20 MB"}
+
+
 def test_task_list_and_missing_task(client, pixiv_enabled, monkeypatch):
     async def fake_import(pixiv_id, *, bot=None, telegram_chat_ids=None, cleanup_messages=True, on_page_done=None):
         if on_page_done is not None:

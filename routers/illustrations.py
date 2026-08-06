@@ -24,7 +24,10 @@ from services.illustration_import_runner import (
     get_import_task,
     list_import_tasks,
 )
-from services.manual_illustration_importer import import_manual_illustration
+from services.manual_illustration_importer import (
+    MAX_IMAGE_BYTES,
+    import_manual_illustration,
+)
 
 router = APIRouter(prefix="/api/illustrations", tags=["illustrations"])
 
@@ -51,7 +54,7 @@ async def create_manual_illustration(
     """Store a non-Pixiv image submitted from the administrator console."""
     try:
         result = await import_manual_illustration(
-            await image.read(),
+            await image.read(MAX_IMAGE_BYTES + 1),
             filename=image.filename or "image.jpg",
             title=title,
             author_name=author_name,
