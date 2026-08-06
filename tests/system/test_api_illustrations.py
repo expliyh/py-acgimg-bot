@@ -130,15 +130,35 @@ def test_proxy_rejects_non_pixiv_domain(client):
     assert response.status_code == 400
 
 
+def test_proxy_rejects_untrusted_url_components(client):
+    urls = [
+        "http://i.pximg.net/x.jpg",
+        "https://user@i.pximg.net/x.jpg",
+        "https://i.pximg.net:443/x.jpg",
+        "https://i.pximg.net:invalid/x.jpg",
+        "https://i.pximg.net//evil.example/x.jpg",
+    ]
+
+    for url in urls:
+        response = client.get("/api/illustrations/image", params={"url": url})
+        assert response.status_code == 400, url
+
+
 def test_proxy_returns_image(client, monkeypatch):
+    fetched_urls = []
+
     async def fake_fetch(url: str) -> bytes:
+        fetched_urls.append(url)
         return b"\xff\xd8fakejpeg"
 
     monkeypatch.setattr("routers.illustrations._fetch_pixiv_bytes", fake_fetch)
     response = client.get(
         "/api/illustrations/image",
-        params={"url": "https://i.pximg.net/img-master/200_p0_master1200.jpg"},
+        params={
+            "url": "https://i.pximg.net/img-master/200_p0_master1200.jpg?token=test#ignored"
+        },
     )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
     assert response.content == b"\xff\xd8fakejpeg"
+    assert fetched_urls == ["/img-master/200_p0_master1200.jpg?token=test"]
