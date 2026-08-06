@@ -31,5 +31,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements/requirements.txt -r requirements/requirements-dev.txt
 
-      - name: Run tests
-        run: python -m pytest
+      - name: Run tests with coverage
+        run: |
+          python -m pytest \
+            --cov=. \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=json:coverage.json
+
+      # A separate workflow_run workflow consumes this as untrusted data. Keeping
+      # the write token out of this workflow lets coverage work safely for forks.
+      - name: Upload coverage report
+        if: ${{ always() && github.event_name == 'pull_request' && hashFiles('coverage.json') != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-report
+          path: coverage.json
+          retention-days: 1
