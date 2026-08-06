@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   test:
@@ -31,5 +32,64 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements/requirements.txt -r requirements/requirements-dev.txt
 
-      - name: Run tests
-        run: python -m pytest
+      - name: Run tests with coverage
+        run: |
+          python -m pytest \
+            --cov=. \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=json:coverage.json
+
+      - name: Report coverage on pull request
+        if: ${{ always() && github.event_name == 'pull_request' && hashFiles('coverage.json') != '' }}
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const coverage = JSON.parse(fs.readFileSync('coverage.json', 'utf8'));
+            const totals = coverage.totals;
+            const marker = '<!-- pytest-coverage-report -->';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const branchCoverage = totals.num_branches
+              ? `${totals.covered_branches} / ${totals.num_branches} (${(totals.covered_branches / totals.num_branches * 100).toFixed(2)}%)`
+              : 'N/A';
+            const body = [
+              marker,
+              '## 🧪 Unit test coverage',
+              '',
+              '| Metric | Result |',
+              '| --- | ---: |',
+              `| Lines | ${totals.covered_lines} / ${totals.num_statements} (${totals.percent_covered_display}%) |`,
+              `| Missing lines | ${totals.missing_lines} |`,
+              `| Branches | ${branchCoverage} |`,
+              '',
+              '> Coverage is currently informational only; no minimum threshold is enforced.',
+              '',
+              `[🔍 View workflow run](${runUrl})`,
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const previous = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes(marker)
+            );
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
