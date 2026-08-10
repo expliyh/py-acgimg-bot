@@ -1,4 +1,4 @@
-fastapi~=0.118.0
+fastapi~=0.141.1
 uvicorn==0.52.1
 python-telegram-bot[all]==22.8
 sqlalchemy[asyncio]==2.0.51
