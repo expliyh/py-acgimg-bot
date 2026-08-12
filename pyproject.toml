@@ -12,7 +12,7 @@ fastapi = "0.141.1"
 uvicorn = "0.52.1"
 python-telegram-bot = {extras = ["all"], version = "22.8"}
 sqlalchemy = {extras = ["asyncio"], version = "2.0.51"}
-asyncmy = "0.2.11"
+asyncmy = "0.2.13"
 mariadb = "1.1.14"
 python-dotenv = "^1.0.0"
 aiosqlite = "0.22.1"
