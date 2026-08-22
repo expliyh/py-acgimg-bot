@@ -44,12 +44,7 @@ jobs:
           }
 
           run_tests unit tests/unit
-          run_tests service \
-            tests/test_command_history.py \
-            tests/test_original_image_manager.py \
-            tests/test_permissions.py \
-            tests/test_service_helpers.py \
-            tests/test_utilities.py
+          run_tests service tests/test_*.py
           run_tests system tests/system
           run_tests e2e tests/e2e
 
