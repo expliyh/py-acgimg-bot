@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { collectAllPages } from '@/utils/table-options';
 
 const client = axios.create({
   baseURL: '/api',
@@ -391,6 +392,10 @@ export async function reloadBotToken(): Promise<BotTokenInfo> {
 export async function listPixivTokens(page = 1, pageSize = 25): Promise<PixivTokenListResponse> {
   const { data } = await client.get<PixivTokenListResponse>('/pixiv-tokens', { params: { page, page_size: pageSize } });
   return data;
+}
+
+export async function listAllPixivTokens(pageSize = 100): Promise<PixivTokenItem[]> {
+  return collectAllPages((page, size) => listPixivTokens(page, size), pageSize);
 }
 
 export async function addPixivToken(token: string, enabled: boolean): Promise<PixivTokenItem> {

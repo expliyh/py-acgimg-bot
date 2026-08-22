@@ -32,6 +32,8 @@ test('shared components use native Vuetify cards, chips, timeline items, icons, 
   assert.match(headerSource, /<v-btn\b[^>]*icon="mdi-theme-light-dark"/);
   assert.match(timelineSource, /<v-timeline\b/);
   assert.match(timelineSource, /<v-timeline-item\b/);
+  assert.match(timelineSource, /function activityKey\(entry: ActivityEntry\)/);
+  assert.match(timelineSource, /:key="activityKey\(entry\)"/);
   assert.match(timelineSource, /#opposite/);
   assert.match(timelineSource, /#icon/);
   assert.match(timelineSource, /#default/);

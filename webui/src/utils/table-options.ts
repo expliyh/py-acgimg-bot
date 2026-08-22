@@ -11,6 +11,19 @@ export type ApiTableParams = {
   sort_order?: 'asc' | 'desc';
 };
 
+export async function collectAllPages<T>(
+  loadPage: (page: number, pageSize: number) => Promise<{ items: T[]; pages: number }>,
+  pageSize: number,
+): Promise<T[]> {
+  const items: T[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const response = await loadPage(page, pageSize);
+    items.push(...response.items);
+    if (page >= response.pages || response.items.length === 0) return items;
+  }
+}
+
 export type ServerTableRequestGuard = {
   begin: (key: string) => number;
   isLatest: (requestId: number) => boolean;

@@ -5,7 +5,7 @@ import { useFeedback } from '@/composables/feedback';
 import type { DataTableHeader } from 'vuetify';
 import type { PixivTokenItem } from '@/services/api';
 import {
-  listPixivTokens,
+  listAllPixivTokens,
   addPixivToken,
   updatePixivToken,
   setPixivTokenEnabled,
@@ -44,8 +44,7 @@ const headers: DataTableHeader<PixivTokenItem>[] = [
 async function load() {
   loading.value = true;
   try {
-    const response = await listPixivTokens();
-    items.value = response.items;
+    items.value = await listAllPixivTokens();
   } catch (error) {
     console.error(error);
     toast.add({ severity: 'error', summary: '加载失败', detail: '无法获取 Pixiv Token 列表。', life: 4000 });

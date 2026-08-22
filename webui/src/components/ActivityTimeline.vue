@@ -25,13 +25,17 @@ function scopeLabel(scope: string) {
       return { label: scope, severity: 'secondary' } as const;
   }
 }
+
+function activityKey(entry: ActivityEntry): string {
+  return `${entry.scope}:${entry.scope_id}:${entry.message_id}`;
+}
 </script>
 
 <template>
   <v-timeline class="w-100">
     <v-timeline-item
       v-for="entry in props.entries"
-      :key="entry.message_id"
+      :key="activityKey(entry)"
       dot-color="primary"
       fill-dot
     >

@@ -21,6 +21,7 @@ const views = Object.fromEntries(
     readFileSync(new URL(`../src/views/${file}`, import.meta.url), 'utf8'),
   ]),
 ) as Record<(typeof viewFiles)[number], string>;
+const apiSource = readFileSync(new URL('../src/services/api.ts', import.meta.url), 'utf8');
 
 test('task views use only native Vuetify imports and auto-imported templates', () => {
   for (const [name, source] of Object.entries(views)) {
@@ -71,6 +72,11 @@ test('local table pagination matches the token and import-task requirements', ()
   assert.match(pixiv, /:hide-default-footer="items\.length <= 10"/);
   assert.match(illustration, /:items-per-page="10"/);
   assert.doesNotMatch(illustration, /hide-default-footer/);
+});
+
+test('Pixiv local table loads all server pages before rendering', () => {
+  assert.match(apiSource, /export async function listAllPixivTokens/);
+  assert.match(views['PixivTokensView.vue'], /listAllPixivTokens/);
 });
 
 test('illustration task row props select the native item and return a mouse click handler', () => {

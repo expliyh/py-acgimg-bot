@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { parseCommandHistoryUserId } from '../src/utils/command-history.ts';
 import {
+  collectAllPages,
   createServerTableRequestGuard,
   toApiTableParams,
 } from '../src/utils/table-options.ts';
@@ -19,6 +20,22 @@ const views = Object.fromEntries(
     readFileSync(new URL(`../src/views/${file}`, import.meta.url), 'utf8'),
   ]),
 ) as Record<(typeof viewFiles)[number], string>;
+
+test('collects every page before rendering a local table', async () => {
+  const requested: Array<[number, number]> = [];
+  const pages = [
+    { items: ['first'], pages: 2 },
+    { items: ['second'], pages: 2 },
+  ];
+
+  const items = await collectAllPages(async (page, pageSize) => {
+    requested.push([page, pageSize]);
+    return pages[page - 1];
+  }, 100);
+
+  assert.deepEqual(items, ['first', 'second']);
+  assert.deepEqual(requested, [[1, 100], [2, 100]]);
+});
 
 test('converts supported server-table sorting into API pagination parameters', () => {
   assert.deepEqual(

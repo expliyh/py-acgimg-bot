@@ -112,11 +112,10 @@ async def set_all_pixiv_tokens_enabled(
     if payload.ids is None:
         await config_registry.set_all_pixiv_tokens_enabled(payload.enabled)
     else:
-        for token_id in payload.ids:
-            try:
-                await config_registry.set_pixiv_token_enabled(token_id, payload.enabled)
-            except ValueError as exc:
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            await config_registry.set_pixiv_tokens_enabled(payload.ids, payload.enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     return await list_pixiv_tokens(page=1, page_size=25, sort_by="id", sort_order="asc")
 
 
