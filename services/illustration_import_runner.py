@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import IllustrationImportTask
@@ -140,15 +140,30 @@ async def _run_import_task(task_id: int) -> None:
         )
 
 
-async def list_import_tasks(limit: int = 20) -> list[IllustrationImportTask]:
+async def list_import_tasks(
+    *,
+    limit: int = 20,
+    offset: int = 0,
+    status: str | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+) -> tuple[int, list[IllustrationImportTask]]:
     async with engine.new_session() as session:
         session: AsyncSession = session
+        sort_column = getattr(IllustrationImportTask, sort_by)
+        stmt = select(IllustrationImportTask)
+        count_stmt = select(func.count()).select_from(IllustrationImportTask)
+        if status is not None:
+            stmt = stmt.where(IllustrationImportTask.status == status)
+            count_stmt = count_stmt.where(IllustrationImportTask.status == status)
+        ordering = desc(sort_column) if sort_order == "desc" else asc(sort_column)
         result = await session.execute(
-            select(IllustrationImportTask)
-            .order_by(IllustrationImportTask.id.desc())
+            stmt.order_by(ordering, IllustrationImportTask.id.desc())
             .limit(limit)
+            .offset(offset)
         )
-        return list(result.scalars())
+        total = (await session.execute(count_stmt)).scalar_one()
+        return total, list(result.scalars())
 
 
 async def get_import_task(task_id: int) -> IllustrationImportTask | None:

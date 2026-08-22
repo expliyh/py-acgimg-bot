@@ -18,9 +18,17 @@ ONE_PIXEL_PNG = base64.b64decode(
 
 
 def test_health(live_server_url, http_client):
-    response = http_client.get("/")
-    assert response.status_code == 200
-    assert response.json() == {"message": "Hello World"}
+    response = http_client.get("/", follow_redirects=False)
+    if (PROJECT_ROOT / "webui" / "dist").exists():
+        assert response.status_code == 307
+        assert response.headers["location"] == "/admin/"
+
+        admin_response = http_client.get("/admin/")
+        assert admin_response.status_code == 200
+        assert "text/html" in admin_response.headers["content-type"]
+    else:
+        assert response.status_code == 200
+        assert response.json() == {"message": "Hello World"}
 
 
 def test_feature_flags(live_server_url, http_client):
@@ -69,8 +77,9 @@ def test_pixiv_tokens_flow(live_server_url, http_client):
     data = http_client.get("/api/pixiv-tokens").json()
     assert data["total"] >= 2
 
-    response = http_client.patch("/api/pixiv-tokens/enabled", json={"enabled": False})
+    response = http_client.patch("/api/pixiv-tokens", json={"enabled": False})
     assert response.status_code == 200
+    assert all(item["enabled"] is False for item in response.json()["items"])
 
     response = http_client.delete("/api/pixiv-tokens")
     assert response.status_code == 200

@@ -42,14 +42,19 @@ export interface CommandHistoryItem {
 export interface CommandHistoryResponse {
   total: number;
   items: CommandHistoryItem[];
+  page: number;
+  page_size: number;
+  pages: number;
 }
 
 export interface CommandHistoryQuery {
   command?: string;
   user_id?: number;
   success?: boolean;
-  limit?: number;
-  offset?: number;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface EnumOption {
@@ -89,6 +94,9 @@ export interface GroupListItem {
 export interface GroupListResponse {
   total: number;
   items: GroupListItem[];
+  page: number;
+  page_size: number;
+  pages: number;
 }
 
 export interface GroupDetail extends GroupListItem {
@@ -99,8 +107,10 @@ export interface GroupListQuery {
   q?: string;
   enable?: boolean;
   chat_enabled?: boolean;
-  limit?: number;
-  offset?: number;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface GroupUpdatePayload {
@@ -140,6 +150,9 @@ export interface PrivateUserListItem {
 export interface PrivateUserListResponse {
   total: number;
   items: PrivateUserListItem[];
+  page: number;
+  page_size: number;
+  pages: number;
 }
 
 export interface PrivateUserDetail extends PrivateUserListItem {
@@ -150,8 +163,10 @@ export interface PrivateUserListQuery {
   q?: string;
   chat_enabled?: boolean;
   status?: string;
-  limit?: number;
-  offset?: number;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface PrivateUserUpdatePayload {
@@ -193,6 +208,9 @@ export interface PixivTokenItem {
 export interface PixivTokenListResponse {
   total: number;
   items: PixivTokenItem[];
+  page: number;
+  page_size: number;
+  pages: number;
 }
 
 export interface IllustrationPreview {
@@ -256,6 +274,9 @@ export interface IllustrationImportTask {
 export interface IllustrationImportTaskListResponse {
   total: number;
   items: IllustrationImportTask[];
+  page: number;
+  page_size: number;
+  pages: number;
 }
 
 export interface ManualIllustrationPayload {
@@ -298,7 +319,7 @@ export async function getGroupDetail(id: number): Promise<GroupDetail> {
 }
 
 export async function updateGroup(id: number, payload: GroupUpdatePayload): Promise<GroupDetail> {
-  const { data } = await client.put<GroupDetail>(`/groups/${id}`, payload);
+  const { data } = await client.patch<GroupDetail>(`/groups/${id}`, payload);
   return data;
 }
 
@@ -321,7 +342,7 @@ export async function updatePrivateUser(
   id: number,
   payload: PrivateUserUpdatePayload
 ): Promise<PrivateUserDetail> {
-  const { data } = await client.put<PrivateUserDetail>(`/private/users/${id}`, payload);
+  const { data } = await client.patch<PrivateUserDetail>(`/private/users/${id}`, payload);
   return data;
 }
 
@@ -367,8 +388,8 @@ export async function reloadBotToken(): Promise<BotTokenInfo> {
   return data;
 }
 
-export async function listPixivTokens(): Promise<PixivTokenListResponse> {
-  const { data } = await client.get<PixivTokenListResponse>('/pixiv-tokens');
+export async function listPixivTokens(page = 1, pageSize = 25): Promise<PixivTokenListResponse> {
+  const { data } = await client.get<PixivTokenListResponse>('/pixiv-tokens', { params: { page, page_size: pageSize } });
   return data;
 }
 
@@ -388,7 +409,7 @@ export async function setPixivTokenEnabled(id: number, enabled: boolean): Promis
 }
 
 export async function setAllPixivTokensEnabled(enabled: boolean): Promise<PixivTokenListResponse> {
-  const { data } = await client.patch<PixivTokenListResponse>('/pixiv-tokens/enabled', { enabled });
+  const { data } = await client.patch<PixivTokenListResponse>('/pixiv-tokens', { enabled });
   return data;
 }
 
@@ -414,8 +435,8 @@ export async function importIllustration(
   return data;
 }
 
-export async function listIllustrationTasks(limit = 20): Promise<IllustrationImportTaskListResponse> {
-  const { data } = await client.get<IllustrationImportTaskListResponse>('/illustrations/tasks', { params: { limit } });
+export async function listIllustrationTasks(page = 1, pageSize = 20): Promise<IllustrationImportTaskListResponse> {
+  const { data } = await client.get<IllustrationImportTaskListResponse>('/illustrations/tasks', { params: { page, page_size: pageSize } });
   return data;
 }
 

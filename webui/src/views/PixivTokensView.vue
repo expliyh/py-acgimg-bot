@@ -1,18 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import DataTable from 'primevue/datatable';
-import Column from 'primevue/column';
-import InputSwitch from 'primevue/toggleswitch';
-import Button from 'primevue/button';
-import Dialog from 'primevue/dialog';
-import InputText from 'primevue/inputtext';
-import ConfirmDialog from 'primevue/confirmdialog';
-import Skeleton from 'primevue/skeleton';
-import Tag from 'primevue/tag';
-import Toast from 'primevue/toast';
-import { useToast } from 'primevue/usetoast';
-import { useConfirm } from 'primevue/useconfirm';
+import { computed, onMounted, ref } from 'vue';
+import { useFeedback } from '@/composables/feedback';
 
+import type { DataTableHeader } from 'vuetify';
 import type { PixivTokenItem } from '@/services/api';
 import {
   listPixivTokens,
@@ -24,8 +14,7 @@ import {
   reloadPixivTokens
 } from '@/services/api';
 
-const toast = useToast();
-const confirm = useConfirm();
+const { toast, confirm } = useFeedback();
 
 const loading = ref(true);
 const saving = ref(false);
@@ -36,6 +25,21 @@ const editingId = ref<number | null>(null);
 const dialogToken = ref('');
 const dialogEnabled = ref(true);
 const showFull = ref<Record<number, boolean>>({});
+
+const dialogModel = computed({
+  get: () => dialogVisible.value,
+  set: (value: boolean) => {
+    dialogVisible.value = value;
+  },
+});
+
+const headers: DataTableHeader<PixivTokenItem>[] = [
+  { title: 'ID', key: 'id', sortable: false },
+  { title: 'Refresh Token', key: 'token', sortable: false },
+  { title: '状态', key: 'status', sortable: false },
+  { title: '启用', key: 'enabled', sortable: false },
+  { title: '操作', key: 'actions', sortable: false },
+];
 
 async function load() {
   loading.value = true;
@@ -67,7 +71,7 @@ function openEdit(item: PixivTokenItem) {
 async function save() {
   const token = dialogToken.value.trim();
   if (!token) {
-    toast.add({ severity: 'warn', summary: '无效输入', detail: 'Refresh Token 不能为空。', life: 3000 });
+    toast.add({ severity: 'warning', summary: '无效输入', detail: 'Refresh Token 不能为空。', life: 3000 });
     return;
   }
   saving.value = true;
@@ -116,7 +120,7 @@ function onDelete(item: PixivTokenItem) {
   confirm.require({
     message: `确定要删除第 ${item.id} 个 Pixiv Token 吗？`,
     header: '删除确认',
-    icon: 'pi pi-exclamation-triangle',
+    icon: 'mdi-alert-outline',
     acceptLabel: '删除',
     rejectLabel: '取消',
     accept: async () => {
@@ -147,91 +151,100 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="flex flex-column gap-4">
-    <Toast />
-    <ConfirmDialog />
-    <header class="flex flex-column gap-2">
-      <h2 class="text-2xl font-semibold m-0">Pixiv Token 管理</h2>
-      <p class="text-color-secondary m-0">
+  <section class="d-flex flex-column ga-4">
+    <header class="d-flex flex-column ga-2">
+      <h2 class="text-h5 font-weight-bold ma-0">Pixiv Token 管理</h2>
+      <p class="text-medium-emphasis ma-0">
         可配置多个 Pixiv Refresh Token（轮询负载均衡）；修改后点击“重新加载”即可生效，无需重启后端。
       </p>
-      <div class="flex flex-wrap gap-2">
-        <Button label="刷新" icon="pi pi-refresh" outlined @click="load" :loading="loading" />
-        <Button label="添加" icon="pi pi-plus" @click="openCreate" />
-        <Button label="全部启用" icon="pi pi-check-square" severity="success" outlined @click="toggleAll(true)" :disabled="!items.length" />
-        <Button label="全部停用" icon="pi pi-ban" severity="warning" outlined @click="toggleAll(false)" :disabled="!items.length" />
-        <Button label="重新加载" icon="pi pi-refresh" @click="onReload" />
+      <div class="d-flex flex-wrap ga-2">
+        <VBtn prepend-icon="mdi-refresh" variant="outlined" @click="load" :loading="loading">刷新</VBtn>
+        <VBtn prepend-icon="mdi-plus" @click="openCreate">添加</VBtn>
+        <VBtn prepend-icon="mdi-checkbox-marked-outline" color="success" variant="outlined" @click="toggleAll(true)" :disabled="!items.length">全部启用</VBtn>
+        <VBtn prepend-icon="mdi-cancel" color="warning" variant="outlined" @click="toggleAll(false)" :disabled="!items.length">全部停用</VBtn>
+        <VBtn prepend-icon="mdi-refresh" @click="onReload">重新加载</VBtn>
       </div>
     </header>
 
-    <Skeleton v-if="loading" height="14rem" class="border-round" />
+    <VSkeletonLoader v-if="loading" height="14rem" class="rounded-lg" />
 
-    <DataTable v-else :value="items" :loading="loading" striped-rows class="shadow-1 border-round" :paginator="items.length > 10" :rows="10" paginator-template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink" data-key="id">
-      <template #empty>
-        <div class="p-4 text-center text-color-secondary">尚未配置 Pixiv Refresh Token，点击右上角“添加”开始配置。</div>
+    <VDataTable
+      v-else
+      :headers="headers"
+      :items="items"
+      :loading="loading"
+      item-value="id"
+      :items-per-page="10"
+      :hide-default-footer="items.length <= 10"
+      class="elevation-1 rounded-lg"
+    >
+      <template #no-data>
+        <div class="p-4 text-center text-medium-emphasis">尚未配置 Pixiv Refresh Token，点击右上角“添加”开始配置。</div>
       </template>
-      <Column field="id" header="ID" :style="{ width: '4rem' }" />
-      <Column header="Refresh Token">
-        <template #body="{ data }">
-          <div class="flex align-items-center gap-2">
-            <code class="text-sm bg-primary-50 px-2 py-1 border-round" style="word-break: break-all">
-              {{ showFull[data.id] ? data.token : data.masked }}
+      <template #item.token="{ item }">
+          <div class="d-flex align-center ga-2">
+            <code class="text-body-2 px-2 py-1 rounded-lg token-code" style="word-break: break-all">
+              {{ showFull[item.id] ? item.token : item.masked }}
             </code>
-            <Button
-              :icon="showFull[data.id] ? 'pi pi-eye-slash' : 'pi pi-eye'"
-              text
-              severity="secondary"
-              @click="showFull[data.id] = !showFull[data.id]"
+            <VBtn
+              :icon="showFull[item.id] ? 'mdi-eye-off' : 'mdi-eye'"
+              variant="text"
+              color="secondary"
+              :aria-label="showFull[item.id] ? '隐藏' : '显示'"
+              @click.stop="showFull[item.id] = !showFull[item.id]"
             />
           </div>
-        </template>
-      </Column>
-      <Column header="状态" :style="{ width: '6rem' }">
-        <template #body="{ data }">
-          <Tag :value="data.enabled ? '启用' : '停用'" :severity="data.enabled ? 'success' : 'warning'" />
-        </template>
-      </Column>
-      <Column header="启用" :style="{ width: '5rem' }">
-        <template #body="{ data }">
-          <InputSwitch :modelValue="data.enabled" @update:modelValue="(value) => toggleEnabled(data, value)" />
-        </template>
-      </Column>
-      <Column header="操作" :style="{ width: '9rem' }">
-        <template #body="{ data }">
-          <div class="flex gap-1">
-            <Button icon="pi pi-pencil" text severity="secondary" @click="openEdit(data)" />
-            <Button icon="pi pi-trash" text severity="danger" @click="onDelete(data)" />
+      </template>
+      <template #item.status="{ item }">
+          <div class="d-flex align-center justify-start w-100">
+            <VChip size="small" :color="item.enabled ? 'success' : 'warning'">{{ item.enabled ? '启用' : '停用' }}</VChip>
           </div>
-        </template>
-      </Column>
-    </DataTable>
+      </template>
+      <template #item.enabled="{ item }">
+          <div class="d-flex align-center justify-start w-100">
+            <VSwitch
+              :model-value="item.enabled"
+              color="primary"
+              hide-details
+              density="compact"
+              @update:modelValue="(value: boolean | null) => toggleEnabled(item, value ?? false)"
+            />
+          </div>
+      </template>
+      <template #item.actions="{ item }">
+          <div class="d-flex align-center justify-start w-100 ga-1">
+            <VBtn icon="mdi-pencil" variant="text" color="secondary" aria-label="修改" @click.stop="openEdit(item)" />
+            <VBtn icon="mdi-delete" variant="text" color="error" aria-label="删除" @click.stop="onDelete(item)" />
+          </div>
+      </template>
+    </VDataTable>
 
-    <Dialog
-      v-model:visible="dialogVisible"
-      :header="editingId === null ? '添加 Pixiv Token' : `修改 Pixiv Token #${editingId}`"
-      modal
-      :style="{ width: '30rem' }"
-    >
-      <div class="flex flex-column gap-4 p-2">
-        <div class="flex flex-column gap-2">
-          <label for="pixiv-token-input" class="font-medium">Refresh Token</label>
-          <InputText
+    <VDialog v-model="dialogModel" max-width="480" aria-labelledby="pixiv-token-dialog-title">
+      <VCard>
+        <VCardTitle id="pixiv-token-dialog-title">{{ editingId === null ? '添加 Pixiv Token' : `修改 Pixiv Token #${editingId}` }}</VCardTitle>
+        <VCardText>
+          <div class="d-flex flex-column ga-4">
+        <div class="d-flex flex-column ga-2">
+          <label for="pixiv-token-input" class="font-weight-medium">Refresh Token</label>
+          <VTextField
             id="pixiv-token-input"
             v-model="dialogToken"
             placeholder="从 Pixiv 申请到的 refresh_token"
             autocomplete="off"
-            class="w-full"
+            class="w-100"
           />
         </div>
-        <div class="flex justify-content-between gap-3 align-items-center">
-          <span class="font-medium">配置后立即启用</span>
-          <InputSwitch v-model="dialogEnabled" />
+        <div class="d-flex justify-space-between ga-3 align-center">
+          <span class="font-weight-medium">配置后立即启用</span>
+          <VSwitch v-model="dialogEnabled" color="primary" hide-details density="compact" />
         </div>
-        <div class="flex justify-content-end gap-2">
-          <Button label="取消" severity="secondary" outlined @click="dialogVisible = false" />
-          <Button label="保存" icon="pi pi-check" :loading="saving" @click="save" />
-        </div>
-      </div>
-    </Dialog>
+          </div>
+        </VCardText>
+        <VCardActions class="justify-end ga-2">
+          <VBtn color="secondary" variant="outlined" @click="dialogModel = false">取消</VBtn>
+          <VBtn prepend-icon="mdi-check" :loading="saving" @click="save">保存</VBtn>
+        </VCardActions>
+      </VCard>
+    </VDialog>
   </section>
 </template>

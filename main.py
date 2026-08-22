@@ -3,7 +3,9 @@ import logging
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from telegram import Update, Bot
 
@@ -30,6 +32,7 @@ from services import pixiv, storage_service, schema_migrator
 from utils.logging_config import setup_logging
 from utils import frontend_launcher
 from utils.admin_static import AdminStaticFiles, redirect_to_admin
+from utils.api_contract import ErrorBody, ErrorResponse, error_code, error_message
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -53,7 +56,9 @@ async def lifespan(app: FastAPI):
             logger.warning("No storage service set")
         else:
             await storage.get_config()
-        if frontend_launcher.auto_start_enabled() and not dist_dir.exists():
+        if frontend_launcher.should_start_frontend_dev_server(
+            static_build_exists=dist_dir.exists()
+        ):
             await frontend_launcher.start_frontend_dev_server()
         await tg_bot.config()
         await pixiv.read_token_from_config()
@@ -83,6 +88,36 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+    del request
+    payload = ErrorResponse(
+        error=ErrorBody(
+            code=error_code(exc.status_code),
+            message=error_message(exc.detail),
+        )
+    )
+    return JSONResponse(status_code=exc.status_code, content=payload.model_dump(exclude_none=True))
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    del request
+    fields: dict[str, list[str]] = {}
+    for item in exc.errors():
+        location = item.get("loc") or ("request",)
+        name = str(location[-1])
+        fields.setdefault(name, []).append(str(item.get("msg", "参数无效")))
+    payload = ErrorResponse(
+        error=ErrorBody(
+            code="validation_error",
+            message="请求参数校验失败",
+            fields=fields,
+        )
+    )
+    return JSONResponse(status_code=422, content=payload.model_dump(exclude_none=True))
 
 for router in (
     dashboard.router,

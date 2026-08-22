@@ -1,10 +1,10 @@
 # ACG 图像 Bot 管理端
 
-该项目提供 FastAPI 后端与基于 PrimeVue 的管理控制台。要在本地运行完整的控制台体验，请按以下步骤操作：
+该项目提供 FastAPI 后端与基于 Vuetify（Material 3）的管理控制台。要在本地运行完整的控制台体验，请按以下步骤操作：
 
 1. 安装 Python 依赖并启动 FastAPI 后端：
    ```bash
-   uvicorn main:app --reload
+   uvicorn main:app
    ```
 2. 安装前端依赖并启动开发服务器：
    ```bash
@@ -27,6 +27,11 @@
 - dev server 运行在 `http://localhost:5173/admin/`，`/api` 请求会自动代理到后端 8000 端口。
 - 后端关闭时 dev server 进程会一并被清理。
 - 已执行 `npm run build`（存在 `webui/dist`）时，后端直接通过 `/admin` 提供构建产物，不再启动 dev server。
+- 若需要在已有构建产物时强制启动开发服务器，请在项目根目录执行以下命令。标准 Uvicorn 不支持 `--debug` 参数：
+
+  ```bash
+  uvicorn main:app --log-level debug
+  ```
 - 通过环境变量关闭自动启动：`AUTO_START_FRONTEND=0`。
 
 ## 数据库

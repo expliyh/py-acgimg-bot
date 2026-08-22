@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import Timeline from 'primevue/timeline';
-import Card from 'primevue/card';
-import Tag from 'primevue/tag';
+import { normalizeVuetifyColor } from '@/composables/feedback';
 
 export interface ActivityEntry {
   message_id: number;
@@ -30,32 +28,42 @@ function scopeLabel(scope: string) {
 </script>
 
 <template>
-  <Timeline :value="props.entries" align="alternate" class="w-full">
-    <template #opposite="slotProps">
-      <span class="text-sm text-color-secondary">
-        {{ slotProps.item.sent_at ? new Date(slotProps.item.sent_at).toLocaleString() : '未知时间' }}
-      </span>
-    </template>
-    <template #marker="slotProps">
-      <span class="flex align-items-center justify-content-center w-2rem h-2rem border-circle bg-primary text-white">
-        <i class="pi pi-bolt"></i>
-      </span>
-    </template>
-    <template #content="slotProps">
-      <Card class="shadow-1">
-        <template #title>
-          <div class="flex align-items-center justify-content-between">
-            <span class="text-sm">消息 ID #{{ slotProps.item.message_id }}</span>
-            <Tag :value="scopeLabel(slotProps.item.scope).label" :severity="scopeLabel(slotProps.item.scope).severity" />
-          </div>
-        </template>
-        <template #content>
-          <div class="text-color-secondary text-sm">对象 ID：{{ slotProps.item.scope_id }}</div>
-          <p class="mt-2 mb-0 white-space-pre-line">
-            {{ slotProps.item.preview ?? '暂无文本内容' }}
-          </p>
-        </template>
-      </Card>
-    </template>
-  </Timeline>
+  <v-timeline class="w-100">
+    <v-timeline-item
+      v-for="entry in props.entries"
+      :key="entry.message_id"
+      dot-color="primary"
+      fill-dot
+    >
+      <template #opposite>
+        <span class="text-body-2 text-medium-emphasis">
+          {{ entry.sent_at ? new Date(entry.sent_at).toLocaleString() : '未知时间' }}
+        </span>
+      </template>
+      <template #icon>
+        <v-icon icon="mdi-flash" color="white" />
+      </template>
+      <template #default>
+        <v-card class="elevation-1">
+          <v-card-title>
+            <div class="d-flex align-center justify-space-between">
+              <span class="text-body-2">消息 ID #{{ entry.message_id }}</span>
+              <v-chip
+                :color="normalizeVuetifyColor(scopeLabel(entry.scope).severity)"
+                size="small"
+              >
+                {{ scopeLabel(entry.scope).label }}
+              </v-chip>
+            </div>
+          </v-card-title>
+          <v-card-text>
+            <div class="text-medium-emphasis text-body-2">对象 ID：{{ entry.scope_id }}</div>
+            <p class="mt-2 mb-0 white-space-pre-line">
+              {{ entry.preview ?? '暂无文本内容' }}
+            </p>
+          </v-card-text>
+        </v-card>
+      </template>
+    </v-timeline-item>
+  </v-timeline>
 </template>

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import CommandHistory
@@ -58,7 +58,9 @@ async def query_history(
     success: bool | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> tuple[int, list[CommandHistory]]:
+    sort_by: str = "triggered_at",
+    sort_order: str = "desc",
+  ) -> tuple[int, list[CommandHistory]]:
     """Retrieve paginated command history entries applying optional filters."""
 
     async with engine.new_session() as session:
@@ -75,7 +77,9 @@ async def query_history(
         stmt = select(CommandHistory)
         if filters:
             stmt = stmt.where(and_(*filters))
-        stmt = stmt.order_by(desc(CommandHistory.triggered_at)).limit(limit).offset(offset)
+        sort_column = getattr(CommandHistory, sort_by)
+        ordering = desc(sort_column) if sort_order == "desc" else asc(sort_column)
+        stmt = stmt.order_by(ordering, CommandHistory.id).limit(limit).offset(offset)
 
         result = await session.execute(stmt)
         items = result.scalars().all()

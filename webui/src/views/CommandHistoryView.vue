@@ -1,50 +1,90 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import DataTable from 'primevue/datatable';
-import Column from 'primevue/column';
-import InputText from 'primevue/inputtext';
-import Dropdown from 'primevue/select';
-import Button from 'primevue/button';
-import Tag from 'primevue/tag';
-import Toast from 'primevue/toast';
-import { useToast } from 'primevue/usetoast';
-import Skeleton from 'primevue/skeleton';
+import { useFeedback } from '@/composables/feedback';
+import type { DataTableHeader, DataTableSortItem } from 'vuetify';
 
 import type { CommandHistoryItem, CommandHistoryQuery } from '@/services/api';
 import { listCommandHistory } from '@/services/api';
+import { parseCommandHistoryUserId } from '@/utils/command-history';
+import {
+  createServerTableRequestGuard,
+  toApiTableParams,
+  type ServerTableOptions,
+} from '@/utils/table-options';
 
-const toast = useToast();
+const { toast } = useFeedback();
 const loading = ref(true);
 const entries = ref<CommandHistoryItem[]>([]);
 
-const pagination = reactive({ page: 0, rows: 20, total: 0 });
+type NativeTableOptions = {
+  page: number;
+  itemsPerPage: number;
+  sortBy: ReadonlyArray<DataTableSortItem>;
+};
+
+const headers: DataTableHeader<CommandHistoryItem>[] = [
+  { title: '时间', key: 'triggered_at', sortable: true },
+  { title: '命令', key: 'command', sortable: true },
+  { title: '参数', key: 'arguments', sortable: false },
+  { title: '用户', key: 'user_id', sortable: false },
+  { title: '会话', key: 'chat_id', sortable: false },
+  { title: '结果', key: 'success', sortable: false },
+  { title: '耗时', key: 'duration_ms', sortable: false },
+  { title: '错误信息', key: 'error_message', sortable: false },
+];
+
+const pagination = reactive<ServerTableOptions & { total: number }>({
+  page: 1,
+  itemsPerPage: 20,
+  sortBy: [],
+  total: 0,
+});
 const filters = reactive<{ command: string; userId: string; success: boolean | null }>({
   command: '',
   userId: '',
   success: null
 });
 
-function parseUserId(): number | undefined {
-  const trimmed = filters.userId.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  return Number.isNaN(parsed) ? undefined : parsed;
+let tableReady = false;
+const requestGuard = createServerTableRequestGuard();
+
+function toServerTableOptions(options: NativeTableOptions): ServerTableOptions {
+  return {
+    page: options.page,
+    itemsPerPage: options.itemsPerPage,
+    sortBy: options.sortBy.map(({ key, order }) => ({
+      key,
+      ...(order === 'asc' || order === 'desc' ? { order } : {}),
+    })),
+  };
 }
 
-async function loadHistory() {
+function optionsKey(options: ServerTableOptions): string {
+  return JSON.stringify({
+    page: options.page,
+    itemsPerPage: options.itemsPerPage,
+    sortBy: options.sortBy,
+  });
+}
+
+async function loadHistory(options: ServerTableOptions = pagination) {
+  const requestId = requestGuard.begin(optionsKey(options));
   loading.value = true;
   try {
+    const tableParams = toApiTableParams(options, ['command', 'triggered_at']);
     const query: CommandHistoryQuery = {
       command: filters.command.trim() || undefined,
-      user_id: parseUserId(),
+      user_id: parseCommandHistoryUserId(filters.userId),
       success: filters.success === null ? undefined : filters.success,
-      limit: pagination.rows,
-      offset: pagination.page * pagination.rows
+      ...tableParams,
     };
     const { items, total } = await listCommandHistory(query);
+    if (!requestGuard.isLatest(requestId)) return;
     entries.value = items;
     pagination.total = total;
   } catch (error) {
+    if (!requestGuard.isLatest(requestId)) return;
+    requestGuard.invalidateFailed(requestId);
     console.error(error);
     toast.add({
       severity: 'error',
@@ -53,19 +93,29 @@ async function loadHistory() {
       life: 4000
     });
   } finally {
-    loading.value = false;
+    if (requestGuard.isLatest(requestId)) {
+      loading.value = false;
+    }
   }
 }
 
 function onSearch() {
-  pagination.page = 0;
-  loadHistory();
+  const options = { ...pagination, page: 1 };
+  pagination.page = 1;
+  void loadHistory(options);
 }
 
-function onPage(event: { page: number; rows: number }) {
-  pagination.page = event.page;
-  pagination.rows = event.rows;
-  loadHistory();
+function onTableOptions(nativeOptions: NativeTableOptions) {
+  if (!tableReady) return;
+
+  const options = toServerTableOptions(nativeOptions);
+  const key = optionsKey(options);
+  if (!requestGuard.shouldLoad(key)) return;
+
+  pagination.page = options.page;
+  pagination.itemsPerPage = options.itemsPerPage;
+  pagination.sortBy = options.sortBy;
+  void loadHistory(options);
 }
 
 function formatArguments(args: string[] | null): string {
@@ -84,107 +134,92 @@ function formatTimestamp(value: string): string {
   return date.toLocaleString();
 }
 
-onMounted(loadHistory);
+onMounted(async () => {
+  tableReady = true;
+  await loadHistory(pagination);
+});
 </script>
 
 <template>
-  <section class="flex flex-column gap-4">
-    <Toast />
-    <header class="flex flex-column gap-2">
-      <h2 class="text-2xl font-semibold m-0">命令历史</h2>
-      <p class="text-color-secondary m-0">
+  <section class="d-flex flex-column ga-4">
+    <header class="d-flex flex-column ga-2">
+      <h2 class="text-h5 font-weight-bold ma-0">命令历史</h2>
+      <p class="text-medium-emphasis ma-0">
         记录最近触发的机器人命令，帮助排查问题与追踪使用情况。
       </p>
-      <div class="grid align-items-end gap-3">
-        <div class="col-12 md:col-4">
-          <label class="block text-sm text-color-secondary mb-2">命令名称</label>
-          <InputText v-model="filters.command" placeholder="如 setu" class="w-full" @keydown.enter="onSearch" />
-        </div>
-        <div class="col-12 md:col-3">
-          <label class="block text-sm text-color-secondary mb-2">用户 ID</label>
-          <InputText v-model="filters.userId" placeholder="精准匹配" class="w-full" @keydown.enter="onSearch" />
-        </div>
-        <div class="col-6 md:col-3">
-          <label class="block text-sm text-color-secondary mb-2">执行状态</label>
-          <Dropdown
+      <VRow class="align-end ga-3">
+        <VCol cols="12" md="4">
+          <VTextField id="command-history-command" label="命令名称" v-model="filters.command" placeholder="如 setu" class="w-100" @keydown.enter="onSearch" />
+        </VCol>
+        <VCol cols="12" md="3">
+          <VTextField id="command-history-user-id" label="用户 ID" v-model="filters.userId" placeholder="精准匹配" class="w-100" @keydown.enter="onSearch" />
+        </VCol>
+        <VCol cols="6" md="3">
+          <VSelect
+            id="command-history-success"
+            label="执行状态"
             v-model="filters.success"
-            :options="[
+            :items="[
               { label: '全部', value: null },
               { label: '成功', value: true },
-              { label: '失败', value: false }
+              { label: '失败', value: false },
             ]"
-            optionLabel="label"
-            optionValue="value"
-            class="w-full"
-            @change="onSearch"
+            item-title="label"
+            item-value="value"
+            class="w-100"
+            @update:modelValue="onSearch"
           />
-        </div>
-        <div class="col-12 md:col-2 flex md:justify-content-end">
-          <Button label="查询" icon="pi pi-search" @click="onSearch" />
-        </div>
-      </div>
+        </VCol>
+        <VCol cols="12" md="2" class="d-flex justify-md-end">
+          <VBtn prepend-icon="mdi-magnify" @click="onSearch">查询</VBtn>
+        </VCol>
+      </VRow>
     </header>
 
-    <DataTable
+    <VDataTableServer
       v-if="entries.length || !loading"
-      :value="entries"
+      :headers="headers"
+      :items="entries"
       :loading="loading"
-      dataKey="id"
-      responsiveLayout="scroll"
-      :rows="pagination.rows"
-      :first="pagination.page * pagination.rows"
-      :totalRecords="pagination.total"
-      paginator
-      lazy
-      :rowsPerPageOptions="[20, 50, 100]"
-      @page="onPage"
-      class="shadow-1 border-round-xl"
+      item-value="id"
+      :page="pagination.page"
+      :items-length="pagination.total"
+      :items-per-page="pagination.itemsPerPage"
+      :items-per-page-options="[20, 50, 100]"
+      :sort-by="pagination.sortBy"
+      @update:options="onTableOptions"
+      class="elevation-1 rounded-lg"
     >
-      <Column field="triggered_at" header="时间" sortable>
-        <template #body="{ data }">
-          {{ formatTimestamp(data.triggered_at) }}
-        </template>
-      </Column>
-      <Column field="command" header="命令" sortable />
-      <Column header="参数">
-        <template #body="{ data }">
-          {{ formatArguments(data.arguments) }}
-        </template>
-      </Column>
-      <Column header="用户">
-        <template #body="{ data }">
-          {{ data.user_id ?? '—' }}
-        </template>
-      </Column>
-      <Column header="会话">
-        <template #body="{ data }">
-          <div class="flex flex-column">
-            <span>{{ data.chat_id ?? '—' }}</span>
-            <small class="text-color-secondary">{{ data.chat_type ?? '未知' }}</small>
+      <template #item.triggered_at="{ item }">
+        {{ formatTimestamp(item.triggered_at) }}
+      </template>
+      <template #item.arguments="{ item }">
+        {{ formatArguments(item.arguments) }}
+      </template>
+      <template #item.user_id="{ item }">
+        {{ item.user_id ?? '—' }}
+      </template>
+      <template #item.chat_id="{ item }">
+          <div class="d-flex flex-column">
+            <span>{{ item.chat_id ?? '—' }}</span>
+            <small class="text-medium-emphasis">{{ item.chat_type ?? '未知' }}</small>
           </div>
-        </template>
-      </Column>
-      <Column header="结果">
-        <template #body="{ data }">
-          <Tag :value="data.success ? '成功' : '失败'" :severity="data.success ? 'success' : 'danger'" />
-        </template>
-      </Column>
-      <Column header="耗时">
-        <template #body="{ data }">
-          {{ formatDuration(data.duration_ms) }}
-        </template>
-      </Column>
-      <Column header="错误信息" style="min-width: 16rem">
-        <template #body="{ data }">
-          <span class="text-sm">{{ data.error_message || '—' }}</span>
-        </template>
-      </Column>
-    </DataTable>
+      </template>
+      <template #item.success="{ item }">
+        <VChip :color="item.success ? 'success' : 'error'">{{ item.success ? '成功' : '失败' }}</VChip>
+      </template>
+      <template #item.duration_ms="{ item }">
+        {{ formatDuration(item.duration_ms) }}
+      </template>
+      <template #item.error_message="{ item }">
+        <span class="text-body-2">{{ item.error_message || '—' }}</span>
+      </template>
+    </VDataTableServer>
 
-    <div v-else class="grid">
-      <div class="col-12" v-for="index in 3" :key="index">
-        <Skeleton height="6rem" class="border-round" />
-      </div>
-    </div>
+    <VRow v-else>
+      <VCol cols="12" v-for="index in 3" :key="index">
+        <VSkeletonLoader height="6rem" class="rounded-lg" />
+      </VCol>
+    </VRow>
   </section>
 </template>

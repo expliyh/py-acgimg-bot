@@ -26,3 +26,9 @@ logs/
 
 # Vite 临时文件
 webui/*.timestamp-*.mjs
+
+# TypeScript/Vite config build outputs
+/webui/vite.config.js
+/webui/vite.config.d.ts
+/webui/tsconfig.tsbuildinfo
+/webui/tsconfig.node.tsbuildinfo

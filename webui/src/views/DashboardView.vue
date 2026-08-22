@@ -1,18 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import Card from 'primevue/card';
-import Skeleton from 'primevue/skeleton';
-import Button from 'primevue/button';
-import Divider from 'primevue/divider';
-import Toast from 'primevue/toast';
-import { useToast } from 'primevue/usetoast';
+import { useFeedback } from '@/composables/feedback';
 
 import StatCard from '@/components/StatCard.vue';
 import ActivityTimeline from '@/components/ActivityTimeline.vue';
 import type { DashboardSummary } from '@/services/api';
 import { fetchDashboardSummary } from '@/services/api';
 
-const toast = useToast();
+const { toast } = useFeedback();
 const loading = ref(true);
 const summary = ref<DashboardSummary | null>(null);
 
@@ -37,97 +32,96 @@ onMounted(loadSummary);
 </script>
 
 <template>
-  <section class="flex flex-column gap-4">
-    <Toast />
-    <div class="flex align-items-center justify-content-between flex-wrap gap-3">
+  <section class="d-flex flex-column ga-4">
+    <div class="d-flex align-center justify-space-between flex-wrap ga-3">
       <div>
-        <h2 class="text-2xl font-semibold m-0">仪表盘</h2>
-        <p class="text-color-secondary mt-1 mb-0">
+        <h2 class="text-h5 font-weight-bold ma-0">仪表盘</h2>
+        <p class="text-medium-emphasis mt-1 mb-0">
           总览运营指标与最近消息动态。
         </p>
       </div>
-      <Button label="刷新" icon="pi pi-refresh" @click="loadSummary" :loading="loading" outlined />
+      <VBtn prepend-icon="mdi-refresh" variant="outlined" :loading="loading" @click="loadSummary">刷新</VBtn>
     </div>
 
-    <div class="grid" v-if="!loading && summary">
-      <div class="col-12 md:col-6 xl:col-3">
+    <VRow v-if="!loading && summary">
+      <VCol cols="12" md="6" xl="3">
         <StatCard
           label="总群组"
           :value="summary.total_groups"
-          icon="pi pi-building"
+          icon="mdi-office-building-outline"
           accent="primary"
           :hint="`${summary.active_groups} 个活跃`"
         />
-      </div>
-      <div class="col-12 md:col-6 xl:col-3">
+      </VCol>
+      <VCol cols="12" md="6" xl="3">
         <StatCard
           label="启用聊天的群"
           :value="summary.chat_enabled_groups"
-          icon="pi pi-microphone"
+          icon="mdi-microphone-outline"
           accent="success"
           :hint="`${summary.total_group_messages} 条群消息`"
         />
-      </div>
-      <div class="col-12 md:col-6 xl:col-3">
+      </VCol>
+      <VCol cols="12" md="6" xl="3">
         <StatCard
           label="用户数量"
           :value="summary.total_users"
-          icon="pi pi-user"
+          icon="mdi-account-outline"
           accent="primary"
           :hint="`${summary.chat_enabled_users} 可聊天`"
         />
-      </div>
-      <div class="col-12 md:col-6 xl:col-3">
+      </VCol>
+      <VCol cols="12" md="6" xl="3">
         <StatCard
           label="私聊消息"
           :value="summary.total_private_messages"
-          icon="pi pi-envelope"
+          icon="mdi-email-outline"
           accent="warning"
           :hint="`近 ${summary.recent_activity.length} 条动态`"
         />
-      </div>
-    </div>
+      </VCol>
+    </VRow>
 
-    <div v-else class="grid">
-      <div class="col-12 md:col-6 xl:col-3" v-for="index in 4" :key="index">
-        <Skeleton height="12rem" class="border-round-xl" />
-      </div>
-    </div>
+    <VRow v-else>
+      <VCol cols="12" md="6" xl="3" v-for="index in 4" :key="index">
+        <VSkeletonLoader height="12rem" class="rounded-lg" />
+      </VCol>
+    </VRow>
 
-    <Card class="shadow-1">
-      <template #title>消息动态</template>
-      <template #content>
+    <VCard class="elevation-1">
+      <VCardTitle>消息动态</VCardTitle>
+      <VCardText>
         <template v-if="summary && summary.recent_activity.length">
           <ActivityTimeline :entries="summary.recent_activity" />
         </template>
         <template v-else-if="loading">
-          <div class="grid">
-            <div class="col-12" v-for="index in 3" :key="index">
-              <Skeleton height="6rem" class="border-round" />
-            </div>
-          </div>
+          <VRow>
+            <VCol cols="12" v-for="index in 3" :key="index">
+              <VSkeletonLoader height="6rem" class="rounded-lg" />
+            </VCol>
+          </VRow>
         </template>
         <template v-else>
-          <div class="text-center py-6 text-color-secondary">
+          <div class="text-center py-6 text-medium-emphasis">
             暂无最新消息，系统保持稳定运行。
           </div>
         </template>
-      </template>
-    </Card>
+      </VCardText>
+    </VCard>
 
-    <Card class="shadow-1">
-      <template #title>运营建议</template>
-      <template #content>
-        <p class="text-sm text-color-secondary mb-3">
+    <VCard class="elevation-1">
+      <VCardTitle>运营建议</VCardTitle>
+      <VCardText>
+        <p class="text-body-2 text-medium-emphasis mb-3">
           根据最近的消息分布，建议关注以下重点：
         </p>
-        <Divider />
-        <ul class="m-0 pl-3 text-sm">
+        <VDivider />
+        <ul class="ma-0 pl-3 text-body-2">
           <li>监控消息量激增的群组，合理设置理智值上限。</li>
           <li>私聊活跃用户可适当启用更多功能，增强粘性。</li>
           <li>预留功能配置已准备就绪，可随业务升级逐步开放。</li>
         </ul>
-      </template>
-    </Card>
+      </VCardText>
+    </VCard>
   </section>
 </template>
