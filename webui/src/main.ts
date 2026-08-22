@@ -1,26 +1,24 @@
 import { createApp } from 'vue';
-import PrimeVue from 'primevue/config';
-import ToastService from 'primevue/toastservice';
-import ConfirmationService from 'primevue/confirmationservice';
-import Aura from '@primeuix/themes/aura';
+import { createVuetify } from 'vuetify';
+import { aliases, mdi } from 'vuetify/iconsets/mdi';
+import 'vuetify/styles';
+import '@mdi/font/css/materialdesignicons.css';
 
 import App from './App.vue';
 import router from './router';
-
-import 'primeflex/primeflex.css';
-import 'primeicons/primeicons.css';
 import '@/styles/main.css';
 
-const app = createApp(App);
-
-app.use(PrimeVue, {
-  ripple: true,
+const storedTheme = localStorage.getItem('acgimg-theme');
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const vuetify = createVuetify({
   theme: {
-    preset: Aura
-  }
+    defaultTheme: storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : systemDark ? 'dark' : 'light',
+    themes: {
+      light: { dark: false, colors: { primary: '#6750A4', secondary: '#625B71', surface: '#FFFBFE', background: '#FFFBFE' } },
+      dark: { dark: true, colors: { primary: '#D0BCFF', secondary: '#CCC2DC', surface: '#141218', background: '#141218' } }
+    }
+  },
+  icons: { defaultSet: 'mdi', aliases, sets: { mdi } }
 });
-app.use(ToastService);
-app.use(ConfirmationService);
-app.use(router);
 
-app.mount('#app');
+createApp(App).use(vuetify).use(router).mount('#app');

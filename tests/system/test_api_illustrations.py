@@ -137,7 +137,12 @@ def test_manual_import_maps_mocked_validation_error(client, monkeypatch):
     )
 
     assert response.status_code == 400
-    assert response.json() == {"detail": "仅支持 JPG、PNG、GIF 和 WebP 图片"}
+    assert response.json() == {
+        "error": {
+            "code": "bad_request",
+            "message": "仅支持 JPG、PNG、GIF 和 WebP 图片",
+        }
+    }
 
 
 def test_manual_import_bounds_upload_read(client, monkeypatch):
@@ -159,7 +164,9 @@ def test_manual_import_bounds_upload_read(client, monkeypatch):
     )
 
     assert response.status_code == 400
-    assert response.json() == {"detail": "图片不能超过 20 MB"}
+    assert response.json() == {
+        "error": {"code": "bad_request", "message": "图片不能超过 20 MB"}
+    }
 
 
 def test_task_list_and_missing_task(client, pixiv_enabled, monkeypatch):

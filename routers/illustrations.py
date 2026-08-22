@@ -10,7 +10,7 @@ import os
 from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
-from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from datetime import datetime
@@ -28,6 +28,7 @@ from services.manual_illustration_importer import (
     MAX_IMAGE_BYTES,
     import_manual_illustration,
 )
+from utils.api_contract import page_meta, page_offset
 
 router = APIRouter(prefix="/api/illustrations", tags=["illustrations"])
 
@@ -144,6 +145,9 @@ class IllustrationImportTaskResponse(BaseModel):
 class IllustrationImportTaskListResponse(BaseModel):
     total: int
     items: list[IllustrationImportTaskResponse]
+    page: int
+    page_size: int
+    pages: int
 
 
 def _task_to_response(task: IllustrationImportTask) -> IllustrationImportTaskResponse:
@@ -181,14 +185,27 @@ async def create_import_task_endpoint(
 
 @router.get("/tasks", response_model=IllustrationImportTaskListResponse)
 async def list_import_tasks_endpoint(
-    limit: int = 20,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    status: str | None = Query(default=None, pattern="^(pending|running|success|failed)$"),
+    sort_by: str = Query(default="created_at"),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> IllustrationImportTaskListResponse:
     """List recent import tasks, newest first."""
-    limit = max(1, min(limit, 100))
-    tasks = await list_import_tasks(limit=limit)
+    allowed_sort_fields = {"id", "pixiv_id", "title", "status", "created_at", "finished_at"}
+    if sort_by not in allowed_sort_fields:
+        raise HTTPException(status_code=422, detail=f"不支持的排序字段: {sort_by}")
+    total, tasks = await list_import_tasks(
+        limit=page_size,
+        offset=page_offset(page, page_size),
+        status=status,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    meta = page_meta(total, page, page_size)
     return IllustrationImportTaskListResponse(
-        total=len(tasks),
         items=[_task_to_response(task) for task in tasks],
+        **meta.model_dump(),
     )
 
 

@@ -7,11 +7,12 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import String, cast, desc, func, or_, select
+from sqlalchemy import String, asc, cast, desc, func, or_, select
 
 from defines import GroupChatMode, GroupStatus
 from models import Group, GroupChatHistory
 from registries.engine import engine
+from utils.api_contract import page_meta, page_offset
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
 
@@ -59,6 +60,9 @@ class GroupListResponse(BaseModel):
 
     total: int
     items: list[GroupListItem]
+    page: int
+    page_size: int
+    pages: int
 
 
 class GroupDetail(GroupListItem):
@@ -117,8 +121,10 @@ async def list_groups(
     chat_enabled: bool | None = Query(
         default=None, description="Filter by AI chat enabled flag"
     ),
-    limit: int = Query(default=25, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    sort_by: str = Query(default="id"),
+    sort_order: str = Query(default="asc", pattern="^(asc|desc)$"),
 ) -> GroupListResponse:
     """List groups with aggregated metadata for the administrative UI."""
 
@@ -134,7 +140,22 @@ async def list_groups(
         )
 
         stmt = _apply_filters(stmt, search=q, enable=enable, chat_enabled=chat_enabled)
-        stmt = stmt.order_by(Group.id).limit(limit).offset(offset)
+        sort_columns = {
+            "id": Group.id,
+            "name": Group.name,
+            "status": Group.status,
+            "enable": Group.enable,
+            "enable_chat": Group.enable_chat,
+            "message_count": func.count(GroupChatHistory.message_id),
+            "last_activity": func.max(GroupChatHistory.sent_at),
+        }
+        if sort_by not in sort_columns:
+            raise HTTPException(status_code=422, detail=f"不支持的排序字段: {sort_by}")
+        sort_column = sort_columns[sort_by]
+        stmt = stmt.order_by(
+            desc(sort_column) if sort_order == "desc" else asc(sort_column),
+            Group.id,
+        ).limit(page_size).offset(page_offset(page, page_size))
         result = await session.execute(stmt)
         rows = result.all()
 
@@ -160,7 +181,8 @@ async def list_groups(
         for row in rows
     ]
 
-    return GroupListResponse(total=total, items=items)
+    meta = page_meta(total, page, page_size)
+    return GroupListResponse(items=items, **meta.model_dump())
 
 
 @router.get("/{group_id}", response_model=GroupDetail)
@@ -220,7 +242,7 @@ async def get_group_detail(group_id: int, recent_limit: int = Query(default=20, 
     )
 
 
-@router.put("/{group_id}", response_model=GroupDetail)
+@router.patch("/{group_id}", response_model=GroupDetail)
 async def update_group(group_id: int, payload: GroupUpdate) -> GroupDetail:
     """Update a group's configuration and return the updated detail object."""
 

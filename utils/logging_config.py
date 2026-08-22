@@ -1,3 +1,4 @@
+import json
 import logging
 import logging.config
 import os
@@ -7,6 +8,22 @@ from typing import Any
 
 _DEFAULT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
 _DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+class JsonFormatter(logging.Formatter):
+    """Serialize log records for environments configured with LOG_FORMAT=json."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "line": record.lineno,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -37,6 +54,18 @@ def setup_logging(force: bool = False) -> None:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     log_format = os.getenv("LOG_FORMAT", _DEFAULT_FORMAT)
     date_format = os.getenv("LOG_DATE_FORMAT", _DEFAULT_DATE_FORMAT)
+
+    formatter: dict[str, Any]
+    if log_format.strip().lower() == "json":
+        formatter = {
+            "()": "utils.logging_config.JsonFormatter",
+            "datefmt": date_format,
+        }
+    else:
+        formatter = {
+            "format": log_format,
+            "datefmt": date_format,
+        }
 
     log_to_file = _env_bool("LOG_TO_FILE", False)
     log_file = os.getenv("LOG_FILE", "logs/app.log")
@@ -70,10 +99,7 @@ def setup_logging(force: bool = False) -> None:
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "detailed": {
-                "format": log_format,
-                "datefmt": date_format,
-            }
+            "detailed": formatter
         },
         "handlers": handlers,
         "root": {
@@ -108,4 +134,4 @@ def setup_logging(force: bool = False) -> None:
     logging.captureWarnings(True)
 
 
-__all__ = ["setup_logging"]
+__all__ = ["JsonFormatter", "setup_logging"]

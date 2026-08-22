@@ -1,41 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import Menubar from 'primevue/menubar';
-import type { MenuItem } from 'primevue/menuitem';
-
-interface NavItem {
-  label: string;
-  icon: string;
-  to: string;
-}
-
-const props = defineProps<{ items: NavItem[]; activePath: string }>();
-const emit = defineEmits<{ (e: 'navigate', to: string): void }>();
-
-const menuModel = computed<MenuItem[]>(() =>
-  props.items.map((item) => ({
-    label: item.label,
-    icon: item.icon,
-    command: () => emit('navigate', item.to),
-    class: { active: props.activePath.startsWith(item.to) }
-  }))
-);
+defineProps<{ dark: boolean }>();
+const emit = defineEmits<{ (e: 'toggle-theme'): void; (e: 'toggle-drawer'): void }>();
 </script>
 
 <template>
-  <header class="surface-card border-bottom-1 surface-border">
-    <Menubar :model="menuModel" class="max-w-full border-none">
-      <template #start>
-        <div class="flex align-items-center gap-2 pl-2">
-          <i class="pi pi-shield text-primary text-xl"></i>
-          <span class="font-semibold text-lg">ACG 图像管控后台</span>
-        </div>
-      </template>
-      <template #end>
-        <div class="pr-3 text-sm text-color-secondary">
-          数据实时刷新，保障多群运营。
-        </div>
-      </template>
-    </Menubar>
-  </header>
+  <v-app-bar flat border="b" color="surface">
+    <v-app-bar-nav-icon class="d-md-none" aria-label="打开导航菜单" @click="emit('toggle-drawer')" />
+    <v-icon icon="mdi-shield-star-outline" color="primary" class="ml-2" />
+    <v-app-bar-title>ACG 图像管控后台</v-app-bar-title>
+    <span class="text-body-2 text-medium-emphasis mr-3 d-none d-sm-inline">Material 3 控制台</span>
+    <v-btn icon="mdi-theme-light-dark" variant="text" :aria-label="dark ? '切换亮色主题' : '切换暗色主题'" @click="emit('toggle-theme')" />
+  </v-app-bar>
 </template>

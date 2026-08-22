@@ -7,11 +7,12 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import String, cast, desc, func, or_, select
+from sqlalchemy import String, asc, cast, desc, func, or_, select
 
 from defines import MessageType, UserStatus
 from models import PrivateChatHistory, User
 from registries.engine import engine
+from utils.api_contract import page_meta, page_offset
 
 router = APIRouter(prefix="/api/private", tags=["private"])
 
@@ -54,6 +55,9 @@ class PrivateUserListResponse(BaseModel):
 
     total: int
     items: list[PrivateUserListItem]
+    page: int
+    page_size: int
+    pages: int
 
 
 class PrivateUserDetail(PrivateUserListItem):
@@ -102,8 +106,10 @@ async def list_private_users(
     q: str | None = Query(default=None, description="Search by user id or nickname"),
     chat_enabled: bool | None = Query(default=None, description="Filter by chat availability"),
     status: UserStatus | None = Query(default=None, description="Filter by user status"),
-    limit: int = Query(default=25, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    sort_by: str = Query(default="id"),
+    sort_order: str = Query(default="asc", pattern="^(asc|desc)$"),
 ) -> PrivateUserListResponse:
     """List private users along with message statistics."""
 
@@ -119,7 +125,21 @@ async def list_private_users(
         )
 
         stmt = _apply_filters(stmt, search=q, chat_enabled=chat_enabled, status=status)
-        stmt = stmt.order_by(User.id).limit(limit).offset(offset)
+        sort_columns = {
+            "id": User.id,
+            "nick_name": User.nick_name,
+            "status": User.status,
+            "enable_chat": User.enable_chat,
+            "message_count": func.count(PrivateChatHistory.message_id),
+            "last_activity": func.max(PrivateChatHistory.sent_at),
+        }
+        if sort_by not in sort_columns:
+            raise HTTPException(status_code=422, detail=f"不支持的排序字段: {sort_by}")
+        sort_column = sort_columns[sort_by]
+        stmt = stmt.order_by(
+            desc(sort_column) if sort_order == "desc" else asc(sort_column),
+            User.id,
+        ).limit(page_size).offset(page_offset(page, page_size))
         result = await session.execute(stmt)
         rows = result.all()
 
@@ -141,7 +161,8 @@ async def list_private_users(
         for row in rows
     ]
 
-    return PrivateUserListResponse(total=total, items=items)
+    meta = page_meta(total, page, page_size)
+    return PrivateUserListResponse(items=items, **meta.model_dump())
 
 
 @router.get("/users/{user_id}", response_model=PrivateUserDetail)
@@ -198,7 +219,7 @@ async def get_private_user(
     )
 
 
-@router.put("/users/{user_id}", response_model=PrivateUserDetail)
+@router.patch("/users/{user_id}", response_model=PrivateUserDetail)
 async def update_private_user(user_id: int, payload: PrivateUserUpdate) -> PrivateUserDetail:
     """Update private user preferences and return the updated detail."""
 

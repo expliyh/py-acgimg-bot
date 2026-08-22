@@ -301,6 +301,28 @@ async def set_pixiv_token_enabled(token_id: int, enabled: bool) -> None:
         await session.commit()
 
 
+async def set_pixiv_tokens_enabled(token_ids: list[int], enabled: bool) -> None:
+    if not token_ids:
+        return
+
+    async with engine.new_session() as session:
+        result = await session.execute(
+            select(PixivToken).where(PixivToken.id.in_(token_ids))
+        )
+        records = list(result.scalars())
+        found_ids = {record.id for record in records}
+        missing_id = next((token_id for token_id in token_ids if token_id not in found_ids), None)
+        if missing_id is not None:
+            raise ValueError(f"Pixiv token {missing_id} does not exist")
+
+        await session.execute(
+            update(PixivToken)
+            .where(PixivToken.id.in_(token_ids))
+            .values(enabled=enabled)
+        )
+        await session.commit()
+
+
 async def set_all_pixiv_tokens_enabled(enabled: bool) -> None:
     async with engine.new_session() as session:
         await session.execute(

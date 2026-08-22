@@ -12,7 +12,7 @@ def test_initial_list_is_empty(client):
 
 def test_add_multiple_tokens(client):
     response = client.post("/api/pixiv-tokens", json={"token": TOKEN_A, "enabled": True})
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     first = response.json()
     assert first["id"] == 1
     assert first["masked"] == "REFR...AAAA"
@@ -35,9 +35,23 @@ def test_toggle_single_token(client):
 def test_toggle_all_tokens(client):
     client.post("/api/pixiv-tokens", json={"token": TOKEN_A})
     client.post("/api/pixiv-tokens", json={"token": TOKEN_B})
-    response = client.patch("/api/pixiv-tokens/enabled", json={"enabled": False})
-    assert response.status_code == 200
+    response = client.patch("/api/pixiv-tokens", json={"enabled": False})
+    assert response.status_code == 200, response.text
     assert all(item["enabled"] is False for item in response.json()["items"])
+
+
+def test_selective_toggle_validates_all_ids_before_writing(client):
+    client.post("/api/pixiv-tokens", json={"token": TOKEN_A, "enabled": True})
+    client.post("/api/pixiv-tokens", json={"token": TOKEN_B, "enabled": True})
+
+    response = client.patch(
+        "/api/pixiv-tokens",
+        json={"ids": [1, 999], "enabled": False},
+    )
+
+    assert response.status_code == 404
+    items = client.get("/api/pixiv-tokens").json()["items"]
+    assert all(item["enabled"] is True for item in items)
 
 
 def test_update_token(client):

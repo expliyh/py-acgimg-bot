@@ -1,17 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import Card from 'primevue/card';
-import InputSwitch from 'primevue/toggleswitch';
-import Tag from 'primevue/tag';
-import Button from 'primevue/button';
-import Toast from 'primevue/toast';
-import { useToast } from 'primevue/usetoast';
-import Skeleton from 'primevue/skeleton';
+import { useFeedback } from '@/composables/feedback';
 
 import type { FeatureFlag, FeatureFlagResponse } from '@/services/api';
 import { fetchFeatureFlags, updateFeatureFlag } from '@/services/api';
 
-const toast = useToast();
+const { toast } = useFeedback();
 const loading = ref(true);
 const features = ref<FeatureFlag[]>([]);
 const placeholders = ref<FeatureFlag[]>([]);
@@ -57,77 +51,79 @@ onMounted(loadFlags);
 </script>
 
 <template>
-  <section class="flex flex-column gap-4">
-    <Toast />
-    <header class="flex flex-column gap-2">
-      <h2 class="text-2xl font-semibold m-0">功能配置</h2>
-      <p class="text-color-secondary m-0">
+  <section class="d-flex flex-column ga-4">
+    <header class="d-flex flex-column ga-2">
+      <h2 class="text-h5 font-weight-bold ma-0">功能配置</h2>
+      <p class="text-medium-emphasis ma-0">
         管理全局功能开关，并预留未来拓展的配置位。
       </p>
-      <Button label="刷新" icon="pi pi-refresh" outlined @click="loadFlags" :loading="loading" class="w-full md:w-auto" />
+      <VBtn prepend-icon="mdi-refresh" variant="outlined" @click="loadFlags" :loading="loading" class="w-100 w-md-auto">刷新</VBtn>
     </header>
 
-    <div v-if="loading" class="grid">
-      <div class="col-12 md:col-6" v-for="index in 4" :key="index">
-        <Skeleton height="8rem" class="border-round" />
-      </div>
-    </div>
+    <VRow v-if="loading">
+      <VCol cols="12" md="6" v-for="index in 4" :key="index">
+        <VSkeletonLoader height="8rem" class="rounded-lg" />
+      </VCol>
+    </VRow>
 
-    <div v-else class="grid gap-4">
-      <div class="col-12">
-        <h3 class="text-xl font-semibold mb-3">已上线功能</h3>
-        <div class="grid">
-          <div class="col-12 md:col-6" v-for="[category, items] in grouped" :key="category">
-            <Card class="shadow-1 h-full">
-              <template #title>
-                <div class="flex align-items-center justify-content-between">
+    <div v-else class="d-flex flex-column ga-4">
+      <div>
+        <h3 class="text-h6 font-weight-bold mb-3">已上线功能</h3>
+        <VRow>
+          <VCol cols="12" md="6" v-for="[category, items] in grouped" :key="category">
+            <VCard class="elevation-1 h-100">
+              <VCardTitle>
+                <div class="d-flex align-center justify-space-between">
                   <span>{{ category }}</span>
-                  <Tag value="可配置" severity="info" />
+                  <VChip size="small" color="info">可配置</VChip>
                 </div>
-              </template>
-              <template #content>
-                <div class="flex flex-column gap-3">
+              </VCardTitle>
+              <VCardText>
+                <div class="d-flex flex-column ga-3">
                   <div
                     v-for="item in items"
                     :key="item.key"
-                    class="flex justify-content-between gap-3 align-items-start"
+                    class="d-flex justify-space-between ga-3 align-start"
                   >
-                    <div class="flex flex-column gap-1">
-                      <span class="font-medium">{{ item.label }}</span>
-                      <span class="text-sm text-color-secondary">{{ item.description }}</span>
+                    <div class="d-flex flex-column ga-1">
+                      <span class="font-weight-medium">{{ item.label }}</span>
+                      <span class="text-body-2 text-medium-emphasis">{{ item.description }}</span>
                     </div>
-                    <InputSwitch
-                      :modelValue="item.value ?? false"
+                    <VSwitch
+                      :model-value="item.value ?? false"
+                      color="primary"
+                      hide-details
+                      density="compact"
                       :disabled="!item.editable"
-                      @update:modelValue="(value) => toggleFlag(item, value)"
+                      @update:modelValue="(value: boolean | null) => toggleFlag(item, value ?? false)"
                     />
                   </div>
                 </div>
-              </template>
-            </Card>
-          </div>
-        </div>
+              </VCardText>
+            </VCard>
+          </VCol>
+          </VRow>
       </div>
 
-      <div class="col-12">
-        <h3 class="text-xl font-semibold mb-3">预留能力</h3>
-        <div class="grid">
-          <div class="col-12 md:col-4" v-for="placeholder in placeholders" :key="placeholder.key">
-            <Card class="shadow-1 h-full">
-              <template #title>
-                <div class="flex align-items-center justify-content-between">
+      <div>
+        <h3 class="text-h6 font-weight-bold mb-3">预留能力</h3>
+        <VRow>
+          <VCol cols="12" md="4" v-for="placeholder in placeholders" :key="placeholder.key">
+            <VCard class="elevation-1 h-100">
+              <VCardTitle>
+                <div class="d-flex align-center justify-space-between">
                   <span>{{ placeholder.label }}</span>
-                  <Tag value="规划中" severity="warning" />
+                  <VChip size="small" color="warning">规划中</VChip>
                 </div>
-              </template>
-              <template #content>
-                <p class="text-sm text-color-secondary mb-0">
+              </VCardTitle>
+              <VCardText>
+                <p class="text-body-2 text-medium-emphasis mb-0">
                   {{ placeholder.description }}
                 </p>
-              </template>
-            </Card>
-          </div>
-        </div>
+              </VCardText>
+            </VCard>
+          </VCol>
+          </VRow>
       </div>
     </div>
   </section>
