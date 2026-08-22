@@ -31,20 +31,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements/requirements.txt -r requirements/requirements-dev.txt
 
-      - name: Run tests with coverage
+      - name: Run tests with coverage by test type
         run: |
-          python -m pytest \
-            --cov=. \
-            --cov-branch \
-            --cov-report=term-missing \
-            --cov-report=json:coverage.json
+          run_tests() {
+            test_type="$1"
+            shift
+            COVERAGE_FILE=".coverage.${test_type}" python -m pytest "$@" \
+              --cov=. \
+              --cov-branch \
+              --cov-report=term-missing \
+              --cov-report="json:coverage-${test_type}.json"
+          }
+
+          run_tests unit tests/unit
+          run_tests service tests/test_*.py
+          run_tests system tests/system
+          run_tests e2e tests/e2e
+
+          python -m coverage combine \
+            .coverage.unit \
+            .coverage.service \
+            .coverage.system \
+            .coverage.e2e
+          python -m coverage report --show-missing
+          python -m coverage json -o coverage.json
 
       # A separate workflow_run workflow consumes this as untrusted data. Keeping
       # the write token out of this workflow lets coverage work safely for forks.
-      - name: Upload coverage report
-        if: ${{ always() && github.event_name == 'pull_request' && hashFiles('coverage.json') != '' }}
+      - name: Upload coverage reports
+        if: ${{ always() && github.event_name == 'pull_request' && hashFiles('coverage*.json') != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: coverage-report
-          path: coverage.json
+          path: coverage*.json
           retention-days: 1
