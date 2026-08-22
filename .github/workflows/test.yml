@@ -60,7 +60,7 @@ jobs:
       # the write token out of this workflow lets coverage work safely for forks.
       - name: Upload coverage reports
         if: ${{ always() && github.event_name == 'pull_request' && hashFiles('coverage*.json') != '' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage*.json
