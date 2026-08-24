@@ -4,7 +4,7 @@ python-telegram-bot[all]==22.8
 sqlalchemy[asyncio]==2.0.51
 asyncmy==0.2.14
 mariadb==1.1.14
-python-dotenv>=1.2.2,<2.0.0
+python-dotenv>=1.2.3,<2.0.0
 aiosqlite==0.22.1
 singleton-class-decorator>=1.0.1,<2.0.0
 aiofiles==25.1.0
