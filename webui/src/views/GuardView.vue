@@ -23,6 +23,7 @@ import {
   changedGuardPolicy,
   cloneGuardPolicy,
 } from "@/utils/guard-policy";
+import { shouldRetainActionRequest } from "@/utils/guard-action";
 
 const route = useRoute();
 const groupId = ref(Number(route.params.id) || 0);
@@ -379,10 +380,13 @@ async function perform() {
       ...payload,
       request_id: pendingAction!.requestId,
     });
-    if (actionResult.value.status !== "success")
+    if (actionResult.value.status !== "success") {
+      if (!shouldRetainActionRequest(actionResult.value.status))
+        pendingAction = null;
       throw new Error(
         `操作${actionResult.value.status}：${JSON.stringify(actionResult.value.data)}`,
       );
+    }
     pendingAction = null;
     if (userId.value)
       member.value = await guardApi.member(groupId.value, userId.value);

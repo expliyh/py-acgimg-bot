@@ -1,16 +1,18 @@
 """Telegram permission boundaries, commands and review/verification callbacks."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 from telegram import Chat, Update, User
 from telegram.error import BadRequest, RetryAfter
 
 from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
+from models import GuardEvent
 from registries import engine
 from services.moderation import actions, reviews, runtime, store, verification
 from services.moderation.schemas import ActionRequest, Policy, Rule
@@ -218,6 +220,36 @@ async def test_join_requests_remain_disabled_by_default(guard_group, guard_bot):
     guard_bot.approve_chat_join_request.assert_not_awaited()
     guard_bot.decline_chat_join_request.assert_not_awaited()
     assert await store.records(guard_group, "review") == []
+
+
+async def test_join_auto_approval_permission_failure_falls_back_to_review(
+    guard_group, guard_bot
+):
+    await store.save_policy(
+        guard_group,
+        {"join_requests_enabled": True, "join_auto_approve": True},
+    )
+    guard_bot.rights["can_invite_users"] = False
+    request = SimpleNamespace(
+        chat=Chat(guard_group, "supergroup"),
+        from_user=User(2, "Applicant", False),
+        date=datetime.now(timezone.utc),
+    )
+    update = SimpleNamespace(chat_join_request=request)
+    context = SimpleNamespace(bot=guard_bot)
+
+    await verification.join_request(update, context)
+    await verification.join_request(update, context)
+
+    guard_bot.approve_chat_join_request.assert_not_awaited()
+    review_rows = await store.records(guard_group, "review")
+    assert len(review_rows) == 1 and review_rows[0]["data"]["state"] == "pending"
+    async with engine.new_session() as session:
+        receipt = await session.scalar(
+            select(GuardEvent).where(GuardEvent.action == "join_request")
+        )
+    assert receipt.status == "success"
+    assert receipt.data["review"] is True
 
 
 async def test_report_rate_limit_and_message_deduplication(

@@ -172,6 +172,13 @@ def disposition(verdict, settings, grading, known=None):
         "image": settings.ai_images,
         "safe": False,
     }
+    if settings.ai_images and known:
+        if known.get("sanity_level") is None or known.get("r18g") is None:
+            return "review"
+        if known["sanity_level"] > grading["sanity_limit"] or (
+            known["r18g"] and not grading["allow_r18g"]
+        ):
+            return "punish"
     if not enabled[verdict.category]:
         return "allow"
     if verdict.category == "image":
@@ -224,17 +231,43 @@ async def process(bot, job):
         grading = await grading_policy(group_id)
         image = None
         known = None
+        text = message.text or message.caption or ""
+        classification_settings = settings
+        image_failure = None
         if settings.ai_images and has_image(message):
-            if not config.vision_model:
-                raise ValueError("未配置视觉模型")
-            image = await image_data(bot, message)
             known = await known_image_grade(message)
+            try:
+                if not config.vision_model:
+                    raise ValueError("未配置视觉模型")
+                image = await image_data(bot, message)
+            except (
+                ValueError,
+                TelegramError,
+                TimeoutError,
+                UnidentifiedImageError,
+                OSError,
+            ) as exc:
+                image_failure = exc
+        if image_failure:
+            if not text or not (settings.ai_spam or settings.ai_abuse):
+                raise image_failure
+            if not config.text_model:
+                raise ValueError("未配置文本模型")
+            classification_settings = settings.model_copy(update={"ai_images": False})
         if not image and not config.text_model:
             raise ValueError("未配置文本模型")
         verdict, usage = await classify(
-            config, settings, message.text or message.caption or "", image, grading
+            config, classification_settings, text, image, grading
         )
         decision = disposition(verdict, settings, grading, known)
+        reason = (
+            "已知图片分级不符合群组策略"
+            if known
+            and settings.ai_images
+            and disposition(verdict, settings, grading, known) == "punish"
+            and verdict.category == "safe"
+            else verdict.reason
+        )
         if not await current(
             bot, group_id, message, data, settings
         ) or grading != await grading_policy(group_id):
@@ -251,7 +284,7 @@ async def process(bot, job):
                 else None,
                 message.message_id,
                 data["incident"],
-                verdict.reason,
+                reason,
                 source="ai",
                 expected=data,
             )
@@ -267,7 +300,7 @@ async def process(bot, job):
                     "message_id": message.message_id,
                     "incident": data["incident"],
                     "version": data["version"],
-                    "reason": verdict.reason,
+                    "reason": reason,
                     "evidence": verdict.evidence,
                     "confidence": verdict.confidence,
                 },

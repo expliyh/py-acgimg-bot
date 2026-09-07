@@ -363,9 +363,6 @@ class Worker:
                 return
             value = Content.model_validate(record["data"])
             late = store.now() - job["due_at"] > timedelta(minutes=5)
-            if not late:
-                await self.bot.send_message(group_id, value.text)
-            await set_state(job["id"], "missed" if late else "done")
             if value.repeat != "once":
                 await store.task(
                     group_id,
@@ -373,6 +370,9 @@ class Worker:
                     next_occurrence(job["due_at"], value.repeat, value.timezone),
                     data,
                 )
+            if not late:
+                await self.bot.send_message(group_id, value.text)
+            await set_state(job["id"], "missed" if late else "done")
 
     async def cleanup(self):
         async with engine.new_session() as session:
@@ -403,7 +403,7 @@ class Worker:
                 await session.execute(
                     delete(GuardTask).where(
                         GuardTask.group_id == group_id,
-                        GuardTask.state.in_(["done", "cancelled", "missed"]),
+                        GuardTask.state.in_(["done", "failed", "cancelled", "missed"]),
                         GuardTask.created_at < cutoff,
                     )
                 )

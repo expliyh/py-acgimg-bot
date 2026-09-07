@@ -85,11 +85,16 @@ async def execute(
         await require_admin(bot, group_id, actor_id)
         if expected:
             latest = await store.record(group_id, "message", str(request.message_id))
-            if (
-                not latest
-                or latest["data"].get("version") != expected["version"]
-                or (await store.policy(group_id)).model_dump() != expected["policy"]
-            ):
+            expected_version = expected.get("version")
+            expected_policy = expected.get("policy")
+            stale_version = expected_version is not None and (
+                not latest or latest["data"].get("version") != expected_version
+            )
+            stale_policy = (
+                expected_policy is not None
+                and (await store.policy(group_id)).model_dump() != expected_policy
+            )
+            if stale_version or stale_policy:
                 raise ValueError("消息或审核策略已改变，取消过时处罚")
             if request.user_id and await store.record(
                 group_id, "exempt", str(request.user_id)

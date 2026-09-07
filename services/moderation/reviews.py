@@ -95,6 +95,7 @@ async def decide(
                 data.get("incident", f"message:{data['message_id']}"),
                 reason,
                 source=source,
+                expected={"version": data["version"]} if data.get("version") else None,
             )
         elif decision == "revoke":
             if not data.get("warning_event"):

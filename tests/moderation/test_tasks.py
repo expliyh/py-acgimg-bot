@@ -187,6 +187,31 @@ async def test_ambiguous_send_is_never_automatically_retried(guard_group, guard_
     assert (await jobs())[0]["state"] == "uncertain"
 
 
+async def test_recurring_announcement_continues_after_ambiguous_send(
+    guard_group, guard_bot, monkeypatch
+):
+    clock = utc_naive(2026, 9, 7, 12)
+    monkeypatch.setattr(store, "now", lambda: clock)
+    await worker.save_content(
+        guard_group,
+        Content(
+            kind="announcement",
+            name="daily",
+            text="hello",
+            due_at=clock.replace(tzinfo=timezone.utc),
+            repeat="daily",
+        ),
+    )
+    guard_bot.send_message.side_effect = TimedOut()
+    await worker.Worker(guard_bot).tick()
+
+    rows = await jobs()
+    assert sorted(row["state"] for row in rows) == ["pending", "uncertain"]
+    following = next(row for row in rows if row["state"] == "pending")
+    assert following["due_at"] == utc_naive(2026, 9, 8, 12)
+    guard_bot.send_message.assert_awaited_once_with(guard_group, "hello")
+
+
 async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
     guard_group, guard_bot, monkeypatch
 ):
@@ -230,8 +255,10 @@ async def test_retention_preserves_effective_warnings_and_uncertain_tasks(
     recent, _ = await store.event(guard_group, "warn", user_id=2)
     expired, _ = await store.event(guard_group, "warn", user_id=2)
     done = await store.task(guard_group, "delete", store.now(), {})
+    failed = await store.task(guard_group, "delete", store.now(), {})
     uncertain = await store.task(guard_group, "announcement", store.now(), {})
     await worker.set_state(done, "done")
+    await worker.set_state(failed, "failed")
     await worker.set_state(uncertain, "uncertain")
     async with engine.new_session() as session:
         await session.execute(

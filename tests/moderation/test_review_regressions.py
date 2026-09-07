@@ -1,5 +1,6 @@
 """Regression cases for automated review findings on PR #124."""
 
+import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -13,7 +14,16 @@ from models import GroupGuardPendingVerification as Pending
 from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
 from services import group_guard
-from services.moderation import ai, reviews, rules, runtime, store, verification, worker
+from services.moderation import (
+    actions,
+    ai,
+    reviews,
+    rules,
+    runtime,
+    store,
+    verification,
+    worker,
+)
 from services.moderation.schemas import AIConfig, AIVerdict
 
 
@@ -329,6 +339,50 @@ async def test_edited_message_can_be_reported_again_after_stale_review(
     assert second and second["id"] != first["id"]
     assert second["data"]["state"] == "pending"
     assert len(await store.records(guard_group, "review")) == 2
+
+
+async def test_review_rechecks_version_after_entering_action_lock(
+    guard_group, guard_bot, guard_message, monkeypatch
+):
+    message = guard_message(text="reported")
+    version = rules.version(message)
+    await store.put_record(
+        guard_group, "message", "10", {"version": version, "blocked": False}
+    )
+    row = await reviews.create(
+        guard_group,
+        f"report:10:{version}",
+        {
+            "kind": "message",
+            "user_id": 2,
+            "message_id": 10,
+            "version": version,
+            "incident": "message:10",
+        },
+    )
+    reached_action = asyncio.Event()
+    release_action = asyncio.Event()
+    original = actions.punish
+
+    async def delayed(*args, **kwargs):
+        reached_action.set()
+        await release_action.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(reviews.actions, "punish", delayed)
+    decision = asyncio.create_task(
+        reviews.decide(guard_bot, guard_group, row["id"], "punish", "spam", actor_id=1)
+    )
+    await reached_action.wait()
+    await store.put_record(
+        guard_group, "message", "10", {"version": "edited", "blocked": False}
+    )
+    release_action.set()
+    result = await decision
+
+    assert result["data"]["state"] == "failed"
+    guard_bot.delete_message.assert_not_awaited()
+    assert await store.warnings(guard_group, 2) == []
 
 
 async def test_policy_repairs_oversized_legacy_verification_message(

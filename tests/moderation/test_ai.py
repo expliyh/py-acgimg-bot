@@ -327,3 +327,53 @@ async def test_image_document_uses_caption_and_known_permitted_grade(
     downloader.assert_awaited_once()
     assert classifier.call_args.args[2:4] == ("normal art", image)
     guard_bot.delete_message.assert_not_awaited()
+
+
+async def test_invalid_image_falls_back_to_caption_moderation(
+    guard_bot, guard_ai_job, monkeypatch
+):
+    job = await guard_ai_job(
+        policy={"ai_spam": True, "ai_images": True},
+        text=None,
+        caption="buy this scam",
+        document={
+            "file_id": "broken-image",
+            "file_unique_id": "broken",
+            "mime_type": "image/jpeg",
+        },
+    )
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=None))
+    monkeypatch.setattr(ai, "image_data", AsyncMock(side_effect=ValueError("broken")))
+    classifier = AsyncMock(
+        return_value=(
+            AIVerdict(category="spam", confidence=1, reason="scam"),
+            {},
+        )
+    )
+    monkeypatch.setattr(ai, "classify", classifier)
+
+    assert await ai.process(guard_bot, job) == "punish"
+    _, fallback_policy, text, image, _ = classifier.call_args.args
+    assert text == "buy this scam" and image is None
+    assert fallback_policy.ai_spam and not fallback_policy.ai_images
+    guard_bot.delete_message.assert_awaited_once_with(job["group_id"], 10)
+
+
+@pytest.mark.parametrize(
+    "known,expected",
+    [
+        ({"sanity_level": 6, "r18g": False}, "punish"),
+        ({"sanity_level": 5, "r18g": False}, "allow"),
+    ],
+)
+def test_known_image_grade_applies_to_safe_model_verdict(known, expected):
+    verdict = AIVerdict(category="safe", confidence=1, reason="safe")
+    assert (
+        ai.disposition(
+            verdict,
+            Policy(ai_images=True),
+            {"sanity_limit": 5, "allow_r18g": False},
+            known,
+        )
+        == expected
+    )

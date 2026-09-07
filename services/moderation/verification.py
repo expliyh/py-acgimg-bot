@@ -313,18 +313,8 @@ async def join_request(update, context):
             },
         )
     raid = await store.record(group_id, "raid", "active")
-    if settings.join_auto_approve and not (
-        raid and raid["data"]["until"] > store.now().isoformat()
-    ):
-        await actions.require_right(context.bot, group_id, "can_invite_users")
-        try:
-            await context.bot.approve_chat_join_request(group_id, request.from_user.id)
-            await store.finish_event(receipt["id"], "success", {"approved": True})
-        except TelegramError as exc:
-            await store.finish_event(
-                receipt["id"], "uncertain", {"error": type(exc).__name__}
-            )
-    else:
+
+    async def create_review(result=None):
         await reviews.create(
             group_id,
             f"join:{request.from_user.id}:{int(request.date.timestamp())}",
@@ -335,4 +325,31 @@ async def join_request(update, context):
             },
             context.bot,
         )
-        await store.finish_event(receipt["id"], "success", {"review": True})
+        await store.finish_event(
+            receipt["id"], "success", {"review": True} | (result or {})
+        )
+
+    if settings.join_auto_approve and not (
+        raid and raid["data"]["until"] > store.now().isoformat()
+    ):
+        try:
+            await actions.require_right(context.bot, group_id, "can_invite_users")
+        except (ValueError, TelegramError) as exc:
+            await create_review(
+                {
+                    "auto_approve": "unavailable",
+                    "error": str(exc)
+                    if isinstance(exc, ValueError)
+                    else type(exc).__name__,
+                }
+            )
+            return
+        try:
+            await context.bot.approve_chat_join_request(group_id, request.from_user.id)
+            await store.finish_event(receipt["id"], "success", {"approved": True})
+        except TelegramError as exc:
+            await store.finish_event(
+                receipt["id"], "uncertain", {"error": type(exc).__name__}
+            )
+    else:
+        await create_review()
