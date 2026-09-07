@@ -1,0 +1,293 @@
+"""Regression cases for the four automated review findings on PR #124."""
+
+from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from sqlalchemy import select, update
+from telegram import ChatMemberRestricted, Update
+
+from handlers.command_handlers import moderation_handler as commands
+from models import GroupGuardPendingVerification as Pending
+from models import GuardEvent, GuardRecord, GuardTask
+from registries import engine
+from services.moderation import ai, reviews, rules, runtime, store, verification, worker
+from services.moderation.schemas import AIConfig, AIVerdict
+
+
+def member_update(message, bot, *, actor=2, old=None, new=None):
+    user = message.from_user.to_dict()
+    return Update.de_json(
+        {
+            "update_id": 100,
+            "chat_member": {
+                "chat": message.chat.to_dict(),
+                "from": {"id": actor, "first_name": "Actor", "is_bot": actor == bot.id},
+                "date": int(message.date.timestamp()),
+                "old_chat_member": old or {"status": "left", "user": user},
+                "new_chat_member": new or {"status": "member", "user": user},
+            },
+        },
+        bot,
+    )
+
+
+@pytest.mark.parametrize("actor", [2, 3], ids=["joining-member", "inviter"])
+@pytest.mark.parametrize("service_first", [False, True])
+async def test_join_updates_preserve_new_verification(
+    guard_group, guard_bot, guard_message, actor, service_first
+):
+    await store.save_policy(guard_group, {"verification_enabled": True})
+    message = guard_message()
+    service_update = Update(
+        99,
+        message=guard_message(
+            text=None, new_chat_members=[message.from_user.to_dict()]
+        ),
+    )
+    context = SimpleNamespace(bot=guard_bot)
+    if service_first:
+        await runtime.preprocess(service_update, context)
+    joined = member_update(message, guard_bot, actor=actor)
+    await runtime.membership(joined, context)
+    await runtime.membership(joined, context)
+    if not service_first:
+        await runtime.preprocess(service_update, context)
+    async with engine.new_session() as session:
+        pending = await session.get(Pending, (guard_group, 2))
+        assert pending.state == "pending"
+        token = pending.token
+        assert await session.scalar(
+            select(GuardEvent).where(GuardEvent.action == "membership")
+        )
+    guard_bot.restrict_chat_member.assert_awaited_once()
+    assert await verification.finish(guard_bot, guard_group, 2, token) == "验证通过"
+
+
+async def test_later_external_permission_change_still_stops_verification(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"verification_enabled": True})
+    message = guard_message()
+    context = SimpleNamespace(bot=guard_bot)
+    await runtime.membership(member_update(message, guard_bot), context)
+    restricted = {
+        "status": "restricted",
+        "user": message.from_user.to_dict(),
+        "is_member": True,
+        "until_date": 0,
+        **{
+            field: False
+            for field in ChatMemberRestricted.__slots__
+            if field.startswith("can_")
+        },
+    }
+    await runtime.membership(
+        member_update(
+            message,
+            guard_bot,
+            actor=1,
+            old=restricted,
+            new=restricted | {"can_send_messages": True},
+        ),
+        context,
+    )
+    async with engine.new_session() as session:
+        pending = await session.get(Pending, (guard_group, 2))
+        assert pending.state == "external"
+        token = pending.token
+    assert (
+        await verification.finish(guard_bot, guard_group, 2, token)
+        == "验证已失效或已处理"
+    )
+    guard_bot.restrict_chat_member.assert_awaited_once()
+
+
+PHOTO = [
+    {"file_id": "photo", "file_unique_id": "unique-photo", "width": 100, "height": 100}
+]
+IMAGE = {"file_id": "image", "file_unique_id": "unique-image", "mime_type": "image/png"}
+PDF = {"file_id": "pdf", "file_unique_id": "unique-pdf", "mime_type": "application/pdf"}
+VIDEO = {
+    "file_id": "video",
+    "file_unique_id": "unique-video",
+    "width": 100,
+    "height": 100,
+    "duration": 1,
+}
+
+
+@pytest.mark.parametrize(
+    "policy,content,queued",
+    [
+        ({"ai_images": True}, {"text": "plain text"}, False),
+        (
+            {"ai_images": True},
+            {"text": None, "document": PDF, "caption": "caption"},
+            False,
+        ),
+        (
+            {"ai_images": True},
+            {"text": None, "video": VIDEO, "caption": "caption"},
+            False,
+        ),
+        ({"ai_images": True}, {"text": None, "photo": PHOTO}, True),
+        ({"ai_images": True}, {"text": None, "document": IMAGE}, True),
+        ({"ai_spam": True}, {"text": "plain text"}, True),
+        (
+            {"ai_abuse": True},
+            {"text": None, "photo": PHOTO, "caption": "caption"},
+            True,
+        ),
+        ({"ai_spam": True}, {"text": None, "photo": PHOTO}, False),
+        ({"ai_abuse": True}, {"text": None, "video": VIDEO}, False),
+    ],
+)
+async def test_only_relevant_content_enters_ai_queue(
+    guard_group, guard_bot, guard_message, policy, content, queued
+):
+    await store.save_policy(guard_group, policy)
+    await store.save_ai_config(
+        AIConfig(base_url="http://127.0.0.1:9/v1", vision_model="test-vision")
+    )
+    message = guard_message(**content)
+    await runtime.preprocess(Update(1, message=message), SimpleNamespace(bot=guard_bot))
+    async with engine.new_session() as session:
+        tasks = (
+            await session.scalars(select(GuardTask).where(GuardTask.kind == "ai"))
+        ).all()
+        assert len(tasks) == int(queued)
+        if queued:
+            assert tasks[0].data["version"] == rules.version(message)
+
+
+@pytest.mark.parametrize("text_model", ["", "test-text"])
+async def test_preexisting_irrelevant_ai_jobs_do_not_consume_budget(
+    guard_group, guard_bot, guard_ai_job, monkeypatch, text_model
+):
+    job = await guard_ai_job(
+        policy={"ai_spam": False, "ai_images": True, "ai_daily_limit": 1}
+    )
+    await store.save_ai_config(
+        AIConfig(
+            base_url="http://127.0.0.1:9/v1",
+            text_model=text_model,
+            vision_model="test-vision",
+        )
+    )
+    classifier = AsyncMock(
+        return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {})
+    )
+    monkeypatch.setattr(ai, "classify", classifier)
+    assert await ai.process(guard_bot, job) == "skipped"
+    classifier.assert_not_awaited()
+    async with engine.new_session() as session:
+        assert (
+            await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai"))
+            is None
+        )
+
+
+async def test_cleanup_expires_temporary_records_without_audit_events(
+    guard_group, guard_bot
+):
+    old_ids = []
+    for kind in ("message", "join_seen", "note", "review", "exempt"):
+        row = await store.put_record(guard_group, kind, "old", {})
+        old_ids.append(row["id"])
+    await store.put_record(guard_group, "message", "recent", {})
+    other = await store.put_record(guard_group + 1, "message", "old", {})
+    old_ids.append(other["id"])
+    async with engine.new_session() as session:
+        assert await session.scalar(select(GuardEvent)) is None
+        await session.execute(
+            update(GuardRecord)
+            .where(GuardRecord.id.in_(old_ids))
+            .values(
+                created_at=store.now() - timedelta(days=3),
+            )
+        )
+        await session.commit()
+    await worker.Worker(guard_bot).cleanup()
+    assert await store.record(guard_group, "message", "old") is None
+    assert await store.record(guard_group, "join_seen", "old") is None
+    assert await store.record(guard_group + 1, "message", "old") is None
+    assert await store.record(guard_group, "message", "recent")
+    for kind in ("note", "review", "exempt"):
+        assert await store.record(guard_group, kind, "old")
+
+
+async def test_cleanup_discovers_task_only_groups(guard_group, guard_bot):
+    await store.save_policy(guard_group, {"log_days": 7})
+    ended = await store.task(guard_group, "delete", store.now(), {})
+    uncertain = await store.task(guard_group, "announcement", store.now(), {})
+    await worker.set_state(ended, "done")
+    await worker.set_state(uncertain, "uncertain")
+    async with engine.new_session() as session:
+        assert await session.scalar(select(GuardEvent)) is None
+        await session.execute(
+            update(GuardTask).values(created_at=store.now() - timedelta(days=8))
+        )
+        await session.commit()
+    await worker.Worker(guard_bot).cleanup()
+    async with engine.new_session() as session:
+        assert await session.get(GuardTask, ended) is None
+        assert (await session.get(GuardTask, uncertain)).state == "uncertain"
+
+
+@pytest.mark.parametrize("tracked", [False, True])
+@pytest.mark.parametrize("edited", [False, True])
+async def test_report_version_controls_later_punishment(
+    guard_group, guard_bot, guard_message, tracked, edited
+):
+    reported = guard_message(text="reported content")
+    context = SimpleNamespace(bot=guard_bot, args=[])
+    if tracked:
+        await runtime.preprocess(Update(1, message=reported), context)
+    report = guard_message(
+        message_id=11, text="/report", reply_to_message=reported.to_dict()
+    )
+    await commands.moderation_command(Update(2, message=report), context)
+    row = await store.record(guard_group, "review", "report:10")
+    assert row["data"].get("version") == rules.version(reported)
+    if edited:
+        changed = guard_message(
+            text="corrected content", edit_date=int(reported.date.timestamp()) + 1
+        )
+        await runtime.preprocess(Update(3, edited_message=changed), context)
+    result = await reviews.decide(
+        guard_bot, guard_group, row["id"], "punish", "reported", actor_id=1
+    )
+    if edited:
+        assert result["data"]["state"] == "failed"
+        guard_bot.delete_message.assert_not_awaited()
+        assert await store.warnings(guard_group, 2) == []
+    else:
+        assert result["data"]["state"] == "resolved"
+        guard_bot.delete_message.assert_awaited_once_with(guard_group, 10)
+        assert len(await store.warnings(guard_group, 2)) == 1
+
+
+async def test_report_reply_never_overwrites_newer_observed_version(
+    guard_group, guard_bot, guard_message
+):
+    original = guard_message(text="old text")
+    latest = guard_message(
+        text="edited text", edit_date=int(original.date.timestamp()) + 1
+    )
+    context = SimpleNamespace(bot=guard_bot, args=[])
+    await runtime.preprocess(Update(1, edited_message=latest), context)
+    report = guard_message(
+        message_id=11, text="/report", reply_to_message=original.to_dict()
+    )
+    await commands.moderation_command(Update(2, message=report), context)
+    assert (await store.record(guard_group, "message", "10"))["data"][
+        "version"
+    ] == rules.version(latest)
+    row = await store.record(guard_group, "review", "report:10")
+    result = await reviews.decide(
+        guard_bot, guard_group, row["id"], "punish", "old report", actor_id=1
+    )
+    assert result["data"]["state"] == "failed"
+    guard_bot.delete_message.assert_not_awaited()

@@ -1,6 +1,7 @@
 import json
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
+from sqlalchemy import update as sql_update
 from telegram.error import TelegramError
 from telegram.ext import ApplicationHandlerStop
 
@@ -15,7 +16,7 @@ from models import (
 )
 from registries import engine
 
-from . import actions, rules, store, verification
+from . import actions, ai, rules, store, verification
 
 
 async def preprocess(update, context):
@@ -104,7 +105,7 @@ async def preprocess(update, context):
 
         await log_message_update(update, context)
         raise ApplicationHandlerStop
-    if settings.ai_spam or settings.ai_abuse or settings.ai_images:
+    if ai.should_classify(message, settings):
         config = await store.ai_config()
         if config.base_url:
             async with engine.new_session() as session:
@@ -169,7 +170,8 @@ async def membership(update, context):
         await member_joined(
             context.bot, change.chat, change.new_chat_member.user, change.date
         )
-    if change.from_user.id != context.bot.id:
+    # A join creates a fresh verification; only later changes can invalidate it.
+    elif change.from_user.id != context.bot.id:
         user_id = change.new_chat_member.user.id
         restriction = await store.record(change.chat.id, "restriction", str(user_id))
         if (
@@ -185,7 +187,7 @@ async def membership(update, context):
         if change.old_chat_member.to_dict() != change.new_chat_member.to_dict():
             async with engine.new_session() as session:
                 await session.execute(
-                    update(GroupGuardPendingVerification)
+                    sql_update(GroupGuardPendingVerification)
                     .where(
                         GroupGuardPendingVerification.group_id == change.chat.id,
                         GroupGuardPendingVerification.user_id == user_id,
@@ -252,7 +254,9 @@ async def migrate(old_id, new_id):
             GuardTask,
         ):
             await session.execute(
-                update(model).where(model.group_id == old_id).values(group_id=new_id)
+                sql_update(model)
+                .where(model.group_id == old_id)
+                .values(group_id=new_id)
             )
         await session.commit()
     from services import group_guard

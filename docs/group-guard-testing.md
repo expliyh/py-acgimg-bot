@@ -2,6 +2,8 @@
 
 群管测试由原有的 `tests/test_moderation.py`、新增的 `tests/moderation/` 和 `webui/tests/guard-api.test.ts` 组成。新增测试直接调用生产服务、Telegram 命令处理器和 ASGI 路由，并检查数据库状态与实际发出的模拟请求。
 
+GitHub Actions 的 service 测试任务包含 `tests/moderation/`，其执行结果及覆盖率会进入 PR 自动报告。
+
 ## 覆盖范围
 
 | 测试文件 | 主要验证行为 |
@@ -11,6 +13,7 @@
 | `tests/moderation/test_tasks.py` | 重启后过期验证、旧验证/解禁任务失效、公告五分钟边界、夏令时与错过周期、公告修改、发送结果不确定、AI 并发与停止、日志保留 |
 | `tests/moderation/test_telegram.py` | 管理员/群主/匿名消息/成员豁免、分项机器人权限、回复和 ID 处罚、时长、回调群归属与权限撤销、他人点击验证、解除失败、举报限流、并发复核、编辑后复核、清理部分失败 |
 | `tests/moderation/test_api.py` | Telegram 配置缓存失效、部分更新校验、操作幂等、未连接与失败结果、群间隔离、分页与统计、公告 UTC、密钥保留和清空、webhook secret |
+| `tests/moderation/test_review_regressions.py` | 入群事件顺序与重复事件、后续权限变更、AI 按启用类别筛选内容、遗留任务不扣预算、无事件群的临时记录与任务清理、举报后的消息版本复查 |
 | `webui/tests/guard-api.test.ts` | 请求路径与名称编码、群 ID、部分更新、处罚幂等标识、超时传播、分页参数、复核与豁免、模型密钥语义、公告时区 |
 
 ## 运行

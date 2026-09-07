@@ -283,6 +283,20 @@ async def moderation_command(update, context):
                 raise ValueError("请回复需要举报的成员消息")
             if len(rules.window((chat.id, user.id, "report"), 60)) > 3:
                 raise ValueError("举报过于频繁，请稍后再试")
+            version = rules.version(reply)
+            async with store.lock(chat.id):
+                # Seed older, unobserved messages without overwriting a newer edit.
+                if not await store.record(chat.id, "message", str(reply.message_id)):
+                    await store.put_record(
+                        chat.id,
+                        "message",
+                        str(reply.message_id),
+                        {
+                            "version": version,
+                            "timestamp": (reply.edit_date or reply.date).timestamp(),
+                            "blocked": False,
+                        },
+                    )
             await reviews.create(
                 chat.id,
                 f"report:{reply.message_id}",
@@ -290,6 +304,7 @@ async def moderation_command(update, context):
                     "kind": "message",
                     "user_id": reply.from_user.id,
                     "message_id": reply.message_id,
+                    "version": version,
                     "incident": f"album:{reply.media_group_id}"
                     if reply.media_group_id
                     else f"message:{reply.message_id}",

@@ -298,9 +298,19 @@ class Worker:
 
     async def cleanup(self):
         async with engine.new_session() as session:
+            # Temporary records exist even in groups with no moderation events.
+            await session.execute(
+                delete(GuardRecord).where(
+                    GuardRecord.kind.in_(["message", "join_seen"]),
+                    GuardRecord.created_at < store.now() - timedelta(days=2),
+                )
+            )
             groups = (
-                await session.scalars(select(GuardEvent.group_id).distinct())
+                await session.scalars(
+                    select(GuardEvent.group_id).union(select(GuardTask.group_id))
+                )
             ).all()
+            await session.commit()
         for group_id in groups:
             settings = await store.policy(group_id)
             cutoff = store.now() - timedelta(
@@ -317,13 +327,6 @@ class Worker:
                         GuardTask.group_id == group_id,
                         GuardTask.state.in_(["done", "cancelled", "missed"]),
                         GuardTask.created_at < cutoff,
-                    )
-                )
-                await session.execute(
-                    delete(GuardRecord).where(
-                        GuardRecord.group_id == group_id,
-                        GuardRecord.kind.in_(["message", "join_seen"]),
-                        GuardRecord.created_at < store.now() - timedelta(days=2),
                     )
                 )
                 await session.commit()
