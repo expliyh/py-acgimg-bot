@@ -12,6 +12,8 @@ from pydantic import (
     model_validator,
 )
 
+VERIFICATION_MESSAGE_MAX_LENGTH = 2000
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -20,7 +22,9 @@ class StrictModel(BaseModel):
 class Policy(StrictModel):
     verification_enabled: bool = False
     verification_timeout: int = Field(60, ge=15, le=3600)
-    verification_message: str | None = Field(None, max_length=2000)
+    verification_message: str | None = Field(
+        None, max_length=VERIFICATION_MESSAGE_MAX_LENGTH
+    )
     kick_on_timeout: bool = True
     keyword_filter_enabled: bool = False
     verification_mode: Literal["button", "math"] = "button"

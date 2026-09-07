@@ -13,7 +13,7 @@ from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
 from services import group_guard
 
-from .schemas import AIConfig, Policy
+from .schemas import VERIFICATION_MESSAGE_MAX_LENGTH, AIConfig, Policy
 
 LEGACY = {
     "verification_enabled",
@@ -56,13 +56,23 @@ def json_data(value):
 
 
 async def policy(group_id: int) -> Policy:
+    repaired = False
     async with engine.new_session() as session:
         row = await session.get(GroupGuardSettings, group_id)
         if row is None:
             return Policy()
         data = dict(row.policy or {})
         data.update({key: getattr(row, key) for key in LEGACY})
-        return Policy.model_validate(data)
+        message = row.verification_message
+        if message and len(message) > VERIFICATION_MESSAGE_MAX_LENGTH:
+            message = message[:VERIFICATION_MESSAGE_MAX_LENGTH]
+            row.verification_message = message
+            data["verification_message"] = message
+            await session.commit()
+            repaired = True
+    if repaired:
+        await group_guard._invalidate_settings_cache(group_id)
+    return Policy.model_validate(data)
 
 
 async def save_policy(group_id: int, changes: dict) -> Policy:

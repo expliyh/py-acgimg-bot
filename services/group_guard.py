@@ -18,6 +18,7 @@ from models import (
     GroupGuardSettings,
 )
 from registries import engine
+from services.moderation.schemas import VERIFICATION_MESSAGE_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,8 @@ async def set_verification_timeout(group_id: int, timeout_seconds: int) -> Guard
 
 async def set_verification_message(group_id: int, message: str | None) -> GuardSettings:
     normalized = message.strip() if message else None
+    if normalized and len(normalized) > VERIFICATION_MESSAGE_MAX_LENGTH:
+        raise ValueError(f"验证提示不能超过 {VERIFICATION_MESSAGE_MAX_LENGTH} 个字符")
     async with engine.new_session() as session:
         session = session  # type: AsyncSession
         record = await session.get(GroupGuardSettings, group_id)

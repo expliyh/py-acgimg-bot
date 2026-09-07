@@ -1,4 +1,4 @@
-"""Regression cases for the four automated review findings on PR #124."""
+"""Regression cases for automated review findings on PR #124."""
 
 from datetime import timedelta
 from types import SimpleNamespace
@@ -10,8 +10,9 @@ from telegram import ChatMemberRestricted, Update
 
 from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
-from models import GuardEvent, GuardRecord, GuardTask
+from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
+from services import group_guard
 from services.moderation import ai, reviews, rules, runtime, store, verification, worker
 from services.moderation.schemas import AIConfig, AIVerdict
 
@@ -249,7 +250,8 @@ async def test_report_version_controls_later_punishment(
         message_id=11, text="/report", reply_to_message=reported.to_dict()
     )
     await commands.moderation_command(Update(2, message=report), context)
-    row = await store.record(guard_group, "review", "report:10")
+    key = f"report:10:{rules.version(reported)}"
+    row = await store.record(guard_group, "review", key)
     assert row["data"].get("version") == rules.version(reported)
     if edited:
         changed = guard_message(
@@ -285,9 +287,78 @@ async def test_report_reply_never_overwrites_newer_observed_version(
     assert (await store.record(guard_group, "message", "10"))["data"][
         "version"
     ] == rules.version(latest)
-    row = await store.record(guard_group, "review", "report:10")
+    row = await store.record(
+        guard_group, "review", f"report:10:{rules.version(original)}"
+    )
     result = await reviews.decide(
         guard_bot, guard_group, row["id"], "punish", "old report", actor_id=1
     )
     assert result["data"]["state"] == "failed"
     guard_bot.delete_message.assert_not_awaited()
+
+
+async def test_edited_message_can_be_reported_again_after_stale_review(
+    guard_group, guard_bot, guard_message
+):
+    original = guard_message(text="old text")
+    context = SimpleNamespace(bot=guard_bot, args=[])
+    first_report = guard_message(
+        message_id=11, text="/report", reply_to_message=original.to_dict()
+    )
+    await commands.moderation_command(Update(1, message=first_report), context)
+    first = await store.record(
+        guard_group, "review", f"report:10:{rules.version(original)}"
+    )
+
+    edited = guard_message(
+        text="new text", edit_date=int(original.date.timestamp()) + 1
+    )
+    await runtime.preprocess(Update(2, edited_message=edited), context)
+    stale = await reviews.decide(
+        guard_bot, guard_group, first["id"], "punish", "old report", actor_id=1
+    )
+    assert stale["data"]["state"] == "failed"
+
+    second_report = guard_message(
+        message_id=12, text="/report", reply_to_message=edited.to_dict()
+    )
+    await commands.moderation_command(Update(3, message=second_report), context)
+    second = await store.record(
+        guard_group, "review", f"report:10:{rules.version(edited)}"
+    )
+    assert second and second["id"] != first["id"]
+    assert second["data"]["state"] == "pending"
+    assert len(await store.records(guard_group, "review")) == 2
+
+
+async def test_policy_repairs_oversized_legacy_verification_message(
+    guard_group,
+):
+    legacy_message = "旧" * 2001
+    async with engine.new_session() as session:
+        session.add(
+            GroupGuardSettings(
+                group_id=guard_group, verification_message=legacy_message
+            )
+        )
+        await session.commit()
+
+    assert (
+        await group_guard.get_guard_settings(guard_group)
+    ).verification_message == legacy_message
+    policy = await store.policy(guard_group)
+    assert policy.verification_message == legacy_message[:2000]
+
+    async with engine.new_session() as session:
+        row = await session.get(GroupGuardSettings, guard_group)
+        assert row.verification_message == legacy_message[:2000]
+    assert (
+        await group_guard.get_guard_settings(guard_group)
+    ).verification_message == legacy_message[:2000]
+
+
+async def test_legacy_verification_setter_rejects_new_oversized_messages(
+    guard_group,
+):
+    with pytest.raises(ValueError, match="2000"):
+        await group_guard.set_verification_message(guard_group, "x" * 2001)

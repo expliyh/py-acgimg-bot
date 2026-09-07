@@ -299,7 +299,7 @@ async def moderation_command(update, context):
                     )
             await reviews.create(
                 chat.id,
-                f"report:{reply.message_id}",
+                f"report:{reply.message_id}:{version}",
                 {
                     "kind": "message",
                     "user_id": reply.from_user.id,

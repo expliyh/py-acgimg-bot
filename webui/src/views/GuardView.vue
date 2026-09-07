@@ -19,6 +19,10 @@ import {
   type GuardTask,
   type ReviewDecision,
 } from "@/services/guard-api";
+import {
+  changedGuardPolicy,
+  cloneGuardPolicy,
+} from "@/utils/guard-policy";
 
 const route = useRoute();
 const groupId = ref(Number(route.params.id) || 0);
@@ -29,6 +33,7 @@ const loading = ref(false),
   success = ref(""),
   tab = ref("overview");
 const policy = ref<GuardPolicy | null>(null);
+const policySnapshot = ref<GuardPolicy | null>(null);
 const permissions = ref<Record<string, unknown>>({});
 const rules = ref<GuardRecord<GuardRule>[]>([]),
   legacy = ref<{ id: number; pattern: string; is_regex: boolean }[]>([]);
@@ -268,6 +273,7 @@ async function load() {
   error.value = "";
   success.value = "";
   policy.value = null;
+  policySnapshot.value = null;
   member.value = null;
   actionResult.value = null;
   try {
@@ -293,6 +299,7 @@ async function load() {
       aiConfig.value,
       tasks.value,
     ] = values;
+    policySnapshot.value = cloneGuardPolicy(policy.value!);
     rules.value = values[1].items;
     legacy.value = values[1].legacy;
     reviewPage.value = 1;
@@ -309,7 +316,11 @@ async function load() {
 }
 async function savePolicy() {
   await run(async () => {
-    policy.value = await guardApi.savePolicy(groupId.value, policy.value!);
+    policy.value = await guardApi.savePolicy(
+      groupId.value,
+      changedGuardPolicy(policy.value!, policySnapshot.value!),
+    );
+    policySnapshot.value = cloneGuardPolicy(policy.value);
   });
 }
 async function refreshRules() {

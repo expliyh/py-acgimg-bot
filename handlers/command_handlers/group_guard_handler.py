@@ -166,7 +166,11 @@ async def _handle_verify_command(
             await message.reply_text("请提供验证提示内容")
             return
         custom_message = " ".join(args[1:])
-        updated = await group_guard.set_verification_message(chat.id, custom_message)
+        try:
+            updated = await group_guard.set_verification_message(chat.id, custom_message)
+        except ValueError as exc:
+            await message.reply_text(str(exc))
+            return
         summary = updated.verification_message or "使用默认提示"
         await message.reply_text(f"验证提示已更新: {summary}")
         return
