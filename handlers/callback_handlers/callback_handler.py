@@ -4,8 +4,10 @@ from telegram.ext import ContextTypes
 from handlers.callback_handlers.conf_handlers.conf_handler import callback_conf_handler_func
 from .guard_handler import guard_callback_handler
 from .original_image_handler import callback_original_image_handler
+from handlers.command_handlers.moderation_handler import callback as moderation_callback
 
 handler_map = {
+    "mod": moderation_callback,
     "conf": callback_conf_handler_func,
     "guard": guard_callback_handler,
     "orig": callback_original_image_handler,

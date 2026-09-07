@@ -69,20 +69,19 @@ async def group_conf_handler_func(
         await query.answer("无效的群组操作", show_alert=True)
         return
 
-    group = await group_registry.get_group_by_id(group_id)
-    admin_ids = set(group.admin_ids or [])
-    if not admin_ids:
-        fetched_admin_ids = await get_cached_admin_ids(context, chat.id)
-        if fetched_admin_ids:
-            admin_ids = set(fetched_admin_ids)
-
     user = update.effective_user
     user_id = getattr(user, "id", None)
     if user_id is None:
         await query.answer("无法识别的用户", show_alert=True)
         return
 
-    if not admin_ids or user_id not in admin_ids:
+    from services.moderation.actions import is_admin
+    from telegram.error import TelegramError
+    try:
+        authorized = await is_admin(context.bot, group_id, user_id)
+    except TelegramError:
+        authorized = False
+    if not authorized:
         await query.answer("只有群组管理员可以执行此操作", show_alert=True)
         return
 

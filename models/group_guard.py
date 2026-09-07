@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text, func, Index
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text, JSON, func, Index
 
 from configs import config as file_config
 from .base import Base
@@ -15,6 +15,7 @@ class GroupGuardSettings(Base):
     verification_message = Column(Text, nullable=True)
     keyword_filter_enabled = Column(Boolean, nullable=False, default=False)
     kick_on_timeout = Column(Boolean, nullable=False, default=True)
+    policy = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime,
@@ -47,6 +48,10 @@ class GroupGuardPendingVerification(Base):
     message_id = Column(BigInteger, nullable=True)
     token = Column(String(32), nullable=False, unique=True)
     expires_at = Column(DateTime, nullable=False)
+    state = Column(String(24), nullable=False, default="pending", server_default="pending")
+    original_permissions = Column(JSON, nullable=True)
+    answer = Column(String(16), nullable=True)
+    result = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (

@@ -3,6 +3,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    { path: '/groups/:id/guard', name: 'group-guard', component: () => import('@/views/GuardView.vue') },
+    { path: '/guard', name: 'guard', component: () => import('@/views/GuardView.vue') },
     {
       path: '/',
       redirect: '/dashboard'

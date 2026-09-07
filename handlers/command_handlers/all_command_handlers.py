@@ -8,6 +8,7 @@ from . import (
     add_manual_handler,
     admin_handler,
     group_guard_handler,
+    moderation_handler,
     option_handler,
     p_info_handler,
     setu_handler,

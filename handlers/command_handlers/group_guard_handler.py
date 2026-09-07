@@ -19,13 +19,14 @@ async def _ensure_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     if chat is None or user is None:
         return False
 
-    group = await group_registry.get_group_by_id(chat.id)
-    admin_ids: set[int] = set(group.admin_ids or [])
-    if not admin_ids:
-        fetched = await get_cached_admin_ids(context, chat.id)
-        if fetched:
-            admin_ids.update(fetched)
-    return bool(admin_ids and user.id in admin_ids)
+    from services.moderation.actions import is_admin
+    from telegram.error import TelegramError
+    if update.effective_message and update.effective_message.sender_chat:
+        return False
+    try:
+        return await is_admin(context.bot, chat.id, user.id)
+    except TelegramError:
+        return False
 
 
 def _format_settings_text(
@@ -97,6 +98,9 @@ async def group_guard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     args = context.args or []
+    from .moderation_handler import guard_extra
+    if await guard_extra(update, context):
+        return
     settings = await group_guard.get_guard_settings(chat.id)
 
     if not args:

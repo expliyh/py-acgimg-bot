@@ -22,6 +22,7 @@ class __Config:
         self.db_name = os.getenv('DATABASE_NAME') or 'acgimg'
         self.db_prefix = os.getenv('DATABASE_PREFIX') or ''
         self.external_url = os.getenv('EXTERNAL_URL')
+        self.telegram_webhook_secret = os.getenv('TELEGRAM_WEBHOOK_SECRET') or None
 
 
 config = __Config()

@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import Request
 
 from telegram import Bot, Update, BotCommand
-from telegram.ext import Application, CommandHandler, ApplicationBuilder
+from telegram.ext import Application, CommandHandler, ApplicationBuilder, MessageHandler, ChatMemberHandler, ChatJoinRequestHandler, filters
 
 from configs import config
 from handlers import all_handlers
@@ -19,6 +19,10 @@ BOT_COMMAND_DEFINITIONS: list[tuple[str, str]] = [
     ("option", "\u6253\u5f00\u4e2a\u4eba\u8bbe\u7f6e"),
     ("admin", "\u6253\u5f00\u7ba1\u7406\u9762\u677f"),
     ("pinfo", "\u67e5\u770b Pixiv \u63d2\u753b\u4fe1\u606f"),
+    ("guard", "智能群管配置"),
+    ("rules", "查看群规"),
+    ("report", "回复消息举报"),
+    ("notes", "查看群笔记"),
 ]
 
 
@@ -34,6 +38,7 @@ class TelegramBot:
         self.tg_app: Application | None = None
         self._mode: Literal["webhook", "polling"] | None = None
         self._app_initialized = False
+        self._guard_worker = None
 
     async def config(self):
         tokens = await config_registry.get_bot_tokens()
@@ -65,8 +70,13 @@ class TelegramBot:
             .connect_timeout(10)
             .build()
         )
+        from services.moderation import runtime, verification
+        self.tg_app.add_handler(MessageHandler(filters.ChatType.GROUPS, runtime.preprocess), group=-10)
+        self.tg_app.add_handler(ChatMemberHandler(runtime.membership, ChatMemberHandler.ANY_CHAT_MEMBER), group=-10)
+        self.tg_app.add_handler(ChatJoinRequestHandler(verification.join_request), group=-10)
         self.tg_app.add_handler(CommandHandler("start", start))
         self.tg_app.add_handlers(all_handlers)
+        self.tg_app.add_handler(MessageHandler(filters.ChatType.GROUPS, runtime.operations), group=10)
 
         try:
             await self.tg_app.initialize()
@@ -77,6 +87,9 @@ class TelegramBot:
 
         self.tg_bot = self.tg_app.bot
         self._app_initialized = True
+        from services.moderation.worker import Worker
+        self._guard_worker = Worker(self.tg_bot)
+        await self._guard_worker.start()
 
         await self._register_commands()
 
@@ -102,6 +115,9 @@ class TelegramBot:
         await self._shutdown()
 
     async def _shutdown(self) -> None:
+        if self._guard_worker:
+            await self._guard_worker.stop()
+            self._guard_worker = None
         if self.tg_app:
             if self.tg_app.updater and self.tg_app.updater.running:
                 with suppress(Exception):
@@ -131,10 +147,13 @@ class TelegramBot:
             raise RuntimeError("Telegram application does not expose an update queue")
 
         webhook_url = self._build_webhook_url(external_url)
+        if not config.telegram_webhook_secret:
+            raise ValueError("Webhook mode requires TELEGRAM_WEBHOOK_SECRET")
         await self.tg_bot.set_webhook(
             webhook_url,
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
+            secret_token=config.telegram_webhook_secret,
         )
 
         self._mode = "webhook"
@@ -153,7 +172,7 @@ class TelegramBot:
             raise RuntimeError("Telegram application updater is not available")
 
         if not self.tg_app.updater.running:
-            await self.tg_app.updater.start_polling()
+            await self.tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
         self._mode = "polling"
         logger.info("Telegram bot configured to use polling mode")

@@ -54,6 +54,7 @@ function save() {
   <VDialog v-model="dialogModel" max-width="800" aria-labelledby="group-dialog-title">
     <VCard v-if="group">
       <VCardTitle id="group-dialog-title">群组详情</VCardTitle>
+      <VCardActions><VBtn :to="`/groups/${group.id}/guard`" prepend-icon="mdi-shield-account" @click="close">智能群管</VBtn></VCardActions>
       <VCardText>
         <section class="d-flex flex-column ga-4">
           <div>

@@ -247,7 +247,24 @@ def _build_comment_clause(comment: str | None) -> str:
     return f" COMMENT '{comment.replace("'", "''")}'"
 
 
+async def _add_moderation_state(conn: AsyncConnection) -> None:
+    additions = {
+        "group_guard_settings": {"policy": "JSON NULL"},
+        "group_guard_pending_verifications": {
+            "state": "VARCHAR(24) NOT NULL DEFAULT 'pending'",
+            "original_permissions": "JSON NULL", "answer": "VARCHAR(16) NULL", "result": "TEXT NULL",
+        },
+    }
+    for suffix, definitions in additions.items():
+        table = f"{file_config.db_prefix}{suffix}"
+        columns = await conn.run_sync(lambda c: {x["name"] for x in inspect(c).get_columns(table)})
+        for name, definition in definitions.items():
+            if name not in columns:
+                await conn.execute(text(f"ALTER TABLE {_quote(table)} ADD COLUMN {_quote(name)} {definition}"))
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
+    Migration(4, "Add durable moderation policy and verification state", _add_moderation_state),
     Migration(
         version=1,
         name="Expand Telegram ID columns to BIGINT",
