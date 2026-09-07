@@ -140,22 +140,73 @@ class Worker:
                         "state": "uncertain",
                         "reason": "处理被中断，请核查实际结果",
                     }
-            await session.commit()
-        for row in values:
-            await store.task(
-                row["group_id"],
-                "verify",
-                row["expires_at"],
-                {"user_id": row["user_id"], "token": row["token"]},
-            )
-        for row in restrictions:
-            if row["data"].get("deadline") and row["data"].get("state") == "active":
-                await store.task(
-                    row["group_id"],
-                    "unmute",
-                    datetime.fromisoformat(row["data"]["deadline"]),
-                    {"user_id": int(row["key"]), "event_id": row["data"]["event_id"]},
+            tasks = (
+                await session.scalars(
+                    select(GuardTask)
+                    .where(
+                        GuardTask.kind.in_(["verify", "unmute"]),
+                        GuardTask.state == "pending",
+                    )
+                    .order_by(GuardTask.created_at, GuardTask.id)
                 )
+            ).all()
+
+            def identity(group_id, kind, data):
+                return (
+                    group_id,
+                    kind,
+                    data.get("user_id"),
+                    data.get("token" if kind == "verify" else "event_id"),
+                )
+
+            pending_tasks = {}
+            for task in tasks:
+                key = identity(task.group_id, task.kind, task.data)
+                pending_tasks.setdefault(key, []).append(task)
+
+            def restore_timeout(group_id, kind, due_at, data):
+                if due_at.tzinfo:
+                    due_at = due_at.astimezone(timezone.utc).replace(tzinfo=None)
+                key = identity(group_id, kind, data)
+                existing = pending_tasks.get(key, [])
+                if existing:
+                    # Keep the original task and reconcile its authoritative deadline.
+                    existing[0].due_at = due_at
+                    for duplicate in existing[1:]:
+                        duplicate.state = "cancelled"
+                        duplicate.result = "恢复时合并重复的到期任务"
+                else:
+                    task = GuardTask(
+                        id=store.uid(),
+                        group_id=group_id,
+                        kind=kind,
+                        due_at=due_at,
+                        data=data,
+                        state="pending",
+                        created_at=store.now(),
+                    )
+                    session.add(task)
+                    pending_tasks[key] = [task]
+
+            for row in values:
+                restore_timeout(
+                    row["group_id"],
+                    "verify",
+                    row["expires_at"],
+                    {"user_id": row["user_id"], "token": row["token"]},
+                )
+            for row in restrictions:
+                if row["data"].get("deadline") and row["data"].get("state") == "active":
+                    restore_timeout(
+                        row["group_id"],
+                        "unmute",
+                        datetime.fromisoformat(row["data"]["deadline"]),
+                        {
+                            "user_id": int(row["key"]),
+                            "event_id": row["data"]["event_id"],
+                        },
+                    )
+            await session.commit()
 
     async def run(self):
         while True:

@@ -1,6 +1,6 @@
 import json
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy import update as sql_update
 from telegram.error import TelegramError
 from telegram.ext import ApplicationHandlerStop
@@ -29,6 +29,8 @@ async def preprocess(update, context):
     settings = await store.policy(chat.id)
     for member in message.new_chat_members or []:
         await member_joined(context.bot, chat, member, message.date)
+    if message.left_chat_member:
+        await member_left(chat.id, message.left_chat_member.id, message.date)
     if message.left_chat_member and settings.goodbye_enabled:
         await context.bot.send_message(
             chat.id,
@@ -150,6 +152,58 @@ async def member_joined(bot, chat, user, date):
         )
 
 
+async def member_left(group_id, user_id, date):
+    """Retire local state without changing Telegram bans or member permissions."""
+    async with store.lock(group_id), engine.new_session() as session:
+        joined = await session.scalar(
+            select(GuardRecord).where(
+                GuardRecord.group_id == group_id,
+                GuardRecord.kind == "join_seen",
+                GuardRecord.key == str(user_id),
+            )
+        )
+        if joined and joined.data["timestamp"] > date.timestamp():
+            return  # A delayed departure must not invalidate a newer join.
+        await session.execute(
+            delete(GuardRecord).where(
+                GuardRecord.group_id == group_id,
+                GuardRecord.kind.in_(["restriction", "join_seen"]),
+                GuardRecord.key == str(user_id),
+            )
+        )
+        await session.execute(
+            sql_update(GroupGuardPendingVerification)
+            .where(
+                GroupGuardPendingVerification.group_id == group_id,
+                GroupGuardPendingVerification.user_id == user_id,
+                GroupGuardPendingVerification.state.in_(
+                    [
+                        "pending",
+                        "preparing",
+                        "processing",
+                        "restricted",
+                        "uncertain",
+                        "external",
+                    ]
+                ),
+            )
+            .values(state="cancelled", result="成员已离群，验证取消")
+        )
+        tasks = (
+            await session.scalars(
+                select(GuardTask).where(
+                    GuardTask.group_id == group_id,
+                    GuardTask.kind.in_(["verify", "unmute"]),
+                    GuardTask.state == "pending",
+                )
+            )
+        ).all()
+        for task in tasks:
+            if task.data.get("user_id") == user_id:
+                task.state, task.result = "cancelled", "成员已离群，到期任务取消"
+        await session.commit()
+
+
 async def membership(update, context):
     change = update.chat_member or update.my_chat_member
     if not change:
@@ -157,21 +211,23 @@ async def membership(update, context):
     if change.chat.type not in {"group", "supergroup"}:
         return
 
-    async def present(member):
+    def present(member):
         return (
             member.status in {"member", "administrator", "creator"}
             or member.status == "restricted"
             and member.is_member
         )
 
-    if not await present(change.old_chat_member) and await present(
-        change.new_chat_member
-    ):
+    was_present = present(change.old_chat_member)
+    is_present = present(change.new_chat_member)
+    if not was_present and is_present:
         await member_joined(
             context.bot, change.chat, change.new_chat_member.user, change.date
         )
-    # A join creates a fresh verification; only later changes can invalidate it.
-    elif change.from_user.id != context.bot.id:
+    elif was_present and not is_present:
+        await member_left(change.chat.id, change.new_chat_member.user.id, change.date)
+    # Only a permission edit for a current member can invalidate our restriction.
+    elif was_present and is_present and change.from_user.id != context.bot.id:
         user_id = change.new_chat_member.user.id
         restriction = await store.record(change.chat.id, "restriction", str(user_id))
         if (
