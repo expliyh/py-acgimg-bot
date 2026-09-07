@@ -15,8 +15,30 @@ from models import (
     GuardTask,
 )
 from registries import engine
+from services.telegram_cache import get_cached_admin_ids, invalidate_chat_admins
 
 from . import actions, ai, rules, store, verification
+
+
+async def remember_message(group_id: int, message):
+    version = rules.version(message)
+    timestamp = (message.edit_date or message.date).timestamp()
+    async with store.lock(group_id):
+        previous = await store.record(group_id, "message", str(message.message_id))
+        if previous and previous["data"].get("version") == version:
+            if previous["data"].get("blocked"):
+                raise ApplicationHandlerStop
+            return None
+        # Ignore older out-of-order edits.
+        if previous and previous["data"].get("timestamp", 0) > timestamp:
+            raise ApplicationHandlerStop
+        await store.put_record(
+            group_id,
+            "message",
+            str(message.message_id),
+            {"version": version, "timestamp": timestamp, "blocked": False},
+        )
+    return version, timestamp
 
 
 async def preprocess(update, context):
@@ -50,16 +72,24 @@ async def preprocess(update, context):
         return
     if message.sender_chat and message.sender_chat.id == chat.id:
         return
+    if not (
+        settings.keyword_filter_enabled
+        or settings.rules_enabled
+        or settings.flood_enabled
+        or ai.should_classify(message, settings)
+    ):
+        # Edits still invalidate reports created for an earlier content version.
+        if message.edit_date:
+            await remember_message(chat.id, message)
+        return
     user_id = (
         message.from_user.id if message.from_user and not message.sender_chat else None
     )
     if user_id:
-        try:
-            if user_id == context.bot.id or await actions.is_admin(
-                context.bot, chat.id, user_id
-            ):
-                return
-        except TelegramError:
+        if user_id == context.bot.id:
+            return
+        admin_ids = await get_cached_admin_ids(context, chat.id)
+        if admin_ids is None or user_id in admin_ids:
             return  # Cannot safely classify an unknown administrator as an ordinary member.
         exempt = await store.record(chat.id, "exempt", str(user_id))
         if exempt and exempt["enabled"]:
@@ -69,23 +99,10 @@ async def preprocess(update, context):
         if message.media_group_id
         else f"message:{message.message_id}"
     )
-    version = rules.version(message)
-    async with store.lock(chat.id):
-        previous = await store.record(chat.id, "message", str(message.message_id))
-        if previous and previous["data"].get("version") == version:
-            if previous["data"].get("blocked"):
-                raise ApplicationHandlerStop
-            return
-        # Ignore older out-of-order edits.
-        timestamp = (message.edit_date or message.date).timestamp()
-        if previous and previous["data"].get("timestamp", 0) > timestamp:
-            raise ApplicationHandlerStop
-        await store.put_record(
-            chat.id,
-            "message",
-            str(message.message_id),
-            {"version": version, "timestamp": timestamp, "blocked": False},
-        )
+    remembered = await remember_message(chat.id, message)
+    if remembered is None:
+        return
+    version, timestamp = remembered
     hit = await rules.evaluate(message, settings)
     if hit:
         await store.put_record(
@@ -210,6 +227,7 @@ async def membership(update, context):
         return
     if change.chat.type not in {"group", "supergroup"}:
         return
+    await invalidate_chat_admins(change.chat.id)
 
     def present(member):
         return (

@@ -198,19 +198,40 @@ async def get_cached_admin_ids(
     now = datetime.now(timezone.utc)
 
     if entry and entry.is_valid(now=now):
-        return list(entry.value)
+        return list(entry.value) if entry.value is not None else None
 
     try:
         admins = await bot.get_chat_administrators(chat_id)
     except TelegramError as exc:
-        if entry:
+        failure_ttl = 30
+        if entry and entry.value is not None:
             logger.debug(
                 "Using stale cached admin list for chat %s due to Telegram error: %s",
                 chat_id,
                 exc,
             )
-            return list(entry.value)
+            stale_admin_ids = list(entry.value)
+            await backend.set(
+                key,
+                CacheEntry(
+                    value=stale_admin_ids,
+                    expires_at=now + timedelta(seconds=failure_ttl),
+                    stored_at=now,
+                ),
+                failure_ttl,
+            )
+            return stale_admin_ids
         logger.warning("Failed to fetch administrators for chat %s: %s", chat_id, exc)
+        # Fail closed and suppress a request storm while Telegram is unavailable.
+        await backend.set(
+            key,
+            CacheEntry(
+                value=None,
+                expires_at=now + timedelta(seconds=failure_ttl),
+                stored_at=now,
+            ),
+            failure_ttl,
+        )
         return None
 
     admin_ids = [member.user.id for member in admins if member.user]

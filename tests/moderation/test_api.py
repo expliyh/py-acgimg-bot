@@ -205,6 +205,34 @@ async def test_announcement_input_requires_offset_and_persists_utc(api, guard_gr
     assert (await api.delete(root + "/contents/restriction/2")).status_code == 422
 
 
+async def test_deleting_announcement_cancels_only_its_pending_tasks(api, guard_group):
+    roots = [
+        f"/api/groups/{guard_group}/guard",
+        f"/api/groups/{guard_group + 1}/guard",
+    ]
+    payload = {
+        "kind": "announcement",
+        "name": "future",
+        "text": "hello",
+        "due_at": "2099-09-08T09:00:00+08:00",
+    }
+    for root in roots:
+        assert (await api.put(root + "/contents", json=payload)).status_code == 200
+
+    response = await api.delete(roots[0] + "/contents/announcement/future")
+    assert response.status_code == 200 and response.json() == {"removed": True}
+    async with engine.new_session() as session:
+        tasks = (
+            await session.scalars(
+                select(GuardTask).where(GuardTask.kind == "announcement")
+            )
+        ).all()
+    assert {task.group_id: task.state for task in tasks} == {
+        guard_group: "cancelled",
+        guard_group + 1: "pending",
+    }
+
+
 async def test_model_secret_omit_preserves_and_empty_clears_without_echo(api):
     initial = {
         "base_url": "https://model.example/v1",

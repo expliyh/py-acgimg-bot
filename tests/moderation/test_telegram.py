@@ -27,11 +27,8 @@ async def test_automatic_moderation_respects_identity_boundaries(
         guard_group, "rule", "spam", Rule(kind="keyword", pattern="spam").model_dump()
     )
     values = {"text": "spam"}
-    if identity == "administrator":
+    if identity == "administrator" or identity == "creator":
         guard_bot.admin_ids.add(2)
-    elif identity == "creator":
-        guard_bot.get_chat_member.side_effect = None
-        guard_bot.get_chat_member.return_value = SimpleNamespace(status="creator")
     elif identity == "self":
         values["from"] = {"id": guard_bot.id, "first_name": "Bot", "is_bot": True}
     elif identity == "anonymous":
@@ -39,7 +36,9 @@ async def test_automatic_moderation_respects_identity_boundaries(
     elif identity == "exempt":
         await store.put_record(guard_group, "exempt", "2", {})
     else:
-        guard_bot.get_chat_member.side_effect = BadRequest("cannot determine role")
+        guard_bot.get_chat_administrators.side_effect = BadRequest(
+            "cannot determine role"
+        )
     for index in range(7):
         await runtime.preprocess(
             Update(index, message=guard_message(message_id=10 + index, **values)),
@@ -48,6 +47,47 @@ async def test_automatic_moderation_respects_identity_boundaries(
     guard_bot.delete_message.assert_not_awaited()
     guard_bot.restrict_chat_member.assert_not_awaited()
     assert await store.warnings(guard_group, 2) == []
+
+
+async def test_disabled_moderation_skips_admin_lookup_and_message_tracking(
+    guard_group, guard_bot, guard_message
+):
+    await runtime.preprocess(
+        Update(1, message=guard_message()), SimpleNamespace(bot=guard_bot)
+    )
+    guard_bot.get_chat_member.assert_not_awaited()
+    guard_bot.get_chat_administrators.assert_not_awaited()
+    assert await store.record(guard_group, "message", "10") is None
+
+
+async def test_enabled_moderation_reuses_cached_admin_list(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"rules_enabled": True})
+    for index in range(2):
+        await runtime.preprocess(
+            Update(
+                index,
+                message=guard_message(message_id=10 + index, text="ordinary"),
+            ),
+            SimpleNamespace(bot=guard_bot),
+        )
+    guard_bot.get_chat_member.assert_not_awaited()
+    guard_bot.get_chat_administrators.assert_awaited_once_with(guard_group)
+
+
+async def test_failed_admin_lookup_is_negatively_cached(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"rules_enabled": True})
+    guard_bot.get_chat_administrators.side_effect = BadRequest("unavailable")
+    for index in range(2):
+        await runtime.preprocess(
+            Update(index, message=guard_message(message_id=10 + index)),
+            SimpleNamespace(bot=guard_bot),
+        )
+    guard_bot.get_chat_administrators.assert_awaited_once_with(guard_group)
+    guard_bot.delete_message.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

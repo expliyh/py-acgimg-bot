@@ -1,5 +1,6 @@
 """Image boundaries and untrusted classifier output, without external requests."""
 
+import asyncio
 import base64
 import io
 import json
@@ -154,6 +155,44 @@ async def test_text_request_truncates_evidence_and_filters_usage():
     content = seen[0]["messages"][1]["content"]
     assert len(content) == 1
     assert len(json.loads(content[0]["text"])["message"]) == 16000
+
+
+async def test_classifier_reads_fragmented_response_to_eof():
+    body = json.dumps(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {"category": "safe", "confidence": 1, "reason": "safe"}
+                        )
+                    }
+                }
+            ]
+        }
+    ).encode()
+
+    async def respond(request):
+        response = web.StreamResponse(
+            status=200, headers={"Content-Type": "application/json"}
+        )
+        await response.prepare(request)
+        await response.write(body[:10])
+        await asyncio.sleep(0.05)
+        await response.write(body[10:])
+        await response.write_eof()
+        return response
+
+    app = web.Application()
+    app.router.add_post("/chat/completions", respond)
+    async with TestServer(app) as server:
+        verdict, usage = await ai.classify(
+            AIConfig(base_url=str(server.make_url("/")), text_model="text-only"),
+            Policy(ai_spam=True),
+            "ordinary",
+        )
+    assert verdict.category == "safe"
+    assert usage == {}
 
 
 @pytest.mark.parametrize("change", ["policy", "admin", "exemption", "grading"])

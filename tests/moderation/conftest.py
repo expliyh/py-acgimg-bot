@@ -13,14 +13,17 @@ from registries import engine
 from services import group_guard
 from services.moderation import rules, store
 from services.moderation.schemas import AIConfig
+from services.telegram_cache import telegram_cache_manager
 
 
 @pytest.fixture(autouse=True)
-def reset_guard_state():
+async def reset_guard_state():
+    await telegram_cache_manager.reset()
     rules._windows.clear()
     group_guard._settings_cache.clear()
     group_guard._keyword_cache.clear()
     yield
+    await telegram_cache_manager.reset()
     rules._windows.clear()
     group_guard._settings_cache.clear()
     group_guard._keyword_cache.clear()
@@ -58,6 +61,14 @@ def guard_bot():
         )
 
     bot.get_chat_member.side_effect = get_member
+
+    async def get_administrators(chat_id):
+        return [
+            SimpleNamespace(user=User(user_id, "Admin", False))
+            for user_id in bot.admin_ids
+        ]
+
+    bot.get_chat_administrators.side_effect = get_administrators
     bot.get_chat.return_value = SimpleNamespace(
         title="Test group",
         permissions=ChatPermissions(can_send_messages=True, can_send_photos=False),

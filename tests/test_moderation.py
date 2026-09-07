@@ -42,15 +42,19 @@ from services.moderation.schemas import (
     Policy,
     Rule,
 )
+from services.telegram_cache import telegram_cache_manager
 
 GROUP = -1001234567890
 
 
 @pytest.fixture(autouse=True)
-def clear_guard_caches():
+async def clear_guard_caches():
+    await telegram_cache_manager.reset()
     rules._windows.clear()
     group_guard._settings_cache.clear()
     group_guard._keyword_cache.clear()
+    yield
+    await telegram_cache_manager.reset()
 
 
 @pytest.fixture
@@ -70,6 +74,13 @@ def tg():
         )
 
     bot.get_chat_member.side_effect = member
+
+    async def administrators(chat_id):
+        return [
+            SimpleNamespace(user=User(user_id, "Admin", False)) for user_id in (999, 1)
+        ]
+
+    bot.get_chat_administrators.side_effect = administrators
     bot.get_chat.return_value = SimpleNamespace(
         permissions=ChatPermissions(can_send_messages=True, can_send_photos=False),
         title="Group",

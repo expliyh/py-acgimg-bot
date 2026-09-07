@@ -205,7 +205,7 @@ async def put_content(group_id: int, payload: Content):
 async def delete_content(
     group_id: int, kind: Literal["reply", "note", "announcement"], name: str
 ):
-    return {"removed": await store.remove_record(group_id, kind, name)}
+    return {"removed": await worker.delete_content(group_id, kind, name)}
 
 
 async def page(model, group_id, page_number, page_size, *where):

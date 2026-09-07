@@ -63,6 +63,33 @@ async def save_content(group_id, value: Content):
         return record
 
 
+async def delete_content(group_id: int, kind: str, name: str) -> bool:
+    async with store.lock(group_id), engine.new_session() as session:
+        result = await session.execute(
+            delete(GuardRecord).where(
+                GuardRecord.group_id == group_id,
+                GuardRecord.kind == kind,
+                GuardRecord.key == name,
+            )
+        )
+        if kind == "announcement":
+            jobs = (
+                await session.scalars(
+                    select(GuardTask).where(
+                        GuardTask.group_id == group_id,
+                        GuardTask.kind == "announcement",
+                        GuardTask.state == "pending",
+                    )
+                )
+            ).all()
+            for job in jobs:
+                if job.data.get("name") == name:
+                    job.state = "cancelled"
+                    job.result = "公告已删除，任务取消"
+        await session.commit()
+        return bool(result.rowcount)
+
+
 async def set_state(job_id, state, result=""):
     async with engine.new_session() as session:
         await session.execute(
