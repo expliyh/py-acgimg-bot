@@ -65,8 +65,10 @@ async def decide(
         if not row or row.group_id != group_id or row.kind != "review":
             raise ValueError("复核记录不存在")
         data, key = dict(row.data), row.key
-        if data["state"] != "pending":
+        if data["state"] not in {"pending", "uncertain"}:
             raise ValueError("该记录已处理或正在处理")
+        if data["state"] == "uncertain" and decision != "dismiss":
+            raise ValueError("结果不确定的复核只能在人工核查后关闭")
         if (data.get("kind") == "join") != (
             decision in {"approve_join", "reject_join"}
         ) and decision not in {"dismiss"}:

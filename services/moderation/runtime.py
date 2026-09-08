@@ -226,6 +226,7 @@ async def member_left(group_id, user_id, date):
         for task in tasks:
             if task.data.get("user_id") == user_id:
                 task.state, task.result = "cancelled", "成员已离群，到期任务取消"
+                task.completed_at = store.now()
         await session.commit()
 
 
@@ -280,6 +281,7 @@ async def membership(update, context):
                         if task.data.get("event_id") == event_id:
                             task.state = "cancelled"
                             task.result = "其他管理员已修改成员权限，原禁言任务取消"
+                            task.completed_at = store.now()
                 await session.execute(
                     sql_update(GroupGuardPendingVerification)
                     .where(
@@ -414,3 +416,5 @@ async def migrate(old_id, new_id):
 
     await group_guard._invalidate_settings_cache(old_id)
     await group_guard._invalidate_settings_cache(new_id)
+    await group_guard._invalidate_keyword_cache(old_id)
+    await group_guard._invalidate_keyword_cache(new_id)

@@ -211,6 +211,14 @@ class Content(StrictModel):
     def normalized_name(cls, value):
         return validate_record_name(value, "内容名称")
 
+    @field_validator("text")
+    @classmethod
+    def normalized_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("内容正文不能为空")
+        return value
+
     @model_validator(mode="after")
     def schedule(self):
         try:

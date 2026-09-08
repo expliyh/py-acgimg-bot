@@ -936,6 +936,16 @@ watch(
                 ></template
               >
             </div>
+            <div v-else-if="row.data.state === 'uncertain'">
+              <VAlert type="warning" variant="tonal" class="my-2"
+                >上次处理被中断，请人工核查 Telegram 实际状态后关闭。</VAlert
+              ><VBtn
+                variant="text"
+                :disabled="busy"
+                @click="decide(row, 'dismiss')"
+                >确认已核查并关闭</VBtn
+              >
+            </div>
             <p v-if="row.data.results">{{ row.data.results }}</p>
           </div>
           <p v-if="!reviews?.items.length">暂无复核记录</p>

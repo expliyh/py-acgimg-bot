@@ -15,6 +15,7 @@ from . import actions, ai, store, verification
 from .schemas import ActionRequest, Content
 
 logger = logging.getLogger(__name__)
+TERMINAL_TASK_STATES = {"done", "failed", "cancelled", "missed"}
 
 
 def next_occurrence(due, repeat, timezone_name, clock=None):
@@ -51,6 +52,7 @@ async def save_content(group_id, value: Content):
                 for job in jobs:
                     if job.data.get("name") == value.name:
                         job.state = "cancelled"
+                        job.completed_at = store.now()
                 await session.commit()
             if value.enabled:
                 await store.task(
@@ -85,16 +87,20 @@ async def delete_content(group_id: int, kind: str, name: str) -> bool:
                 if job.data.get("name") == name:
                     job.state = "cancelled"
                     job.result = "公告已删除，任务取消"
+                    job.completed_at = store.now()
         await session.commit()
         return bool(result.rowcount)
 
 
 async def set_state(job_id, state, result=""):
+    values = {
+        "state": state,
+        "result": result[:2000],
+        "completed_at": store.now() if state in TERMINAL_TASK_STATES else None,
+    }
     async with engine.new_session() as session:
         await session.execute(
-            update(GuardTask)
-            .where(GuardTask.id == job_id)
-            .values(state=state, result=result[:2000])
+            update(GuardTask).where(GuardTask.id == job_id).values(**values)
         )
         await session.commit()
 
@@ -127,7 +133,11 @@ class Worker:
             await session.execute(
                 update(GuardTask)
                 .where(GuardTask.state == "running")
-                .values(state="uncertain", result="进程中断，结果需核查")
+                .values(
+                    state="uncertain",
+                    result="进程中断，结果需核查",
+                    completed_at=None,
+                )
             )
             await session.execute(
                 update(GuardEvent)
@@ -201,6 +211,7 @@ class Worker:
                     for duplicate in existing[1:]:
                         duplicate.state = "cancelled"
                         duplicate.result = "恢复时合并重复的到期任务"
+                        duplicate.completed_at = store.now()
                 else:
                     task = GuardTask(
                         id=store.uid(),
@@ -277,7 +288,7 @@ class Worker:
                 result = await session.execute(
                     update(GuardTask)
                     .where(GuardTask.id == job["id"], GuardTask.state == "pending")
-                    .values(state="running")
+                    .values(state="running", completed_at=None)
                 )
                 await session.commit()
                 if not result.rowcount:
@@ -336,15 +347,16 @@ class Worker:
             raise
         except Exception as exc:
             logger.exception("Moderation task %s failed", job["id"])
+            task_status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
             await set_state(
                 job["id"],
-                "uncertain" if actions.is_uncertain_error(exc) else "failed",
+                task_status,
                 type(exc).__name__,
             )
             await store.event(
                 group_id,
                 "task",
-                status="failed",
+                status=task_status,
                 reason=type(exc).__name__,
                 data={"task_id": job["id"], "kind": kind},
             )
@@ -403,7 +415,7 @@ class Worker:
                     delete(GuardTask).where(
                         GuardTask.group_id == group_id,
                         GuardTask.state.in_(["done", "failed", "cancelled", "missed"]),
-                        GuardTask.created_at < cutoff,
+                        GuardTask.completed_at < cutoff,
                     )
                 )
                 await session.commit()

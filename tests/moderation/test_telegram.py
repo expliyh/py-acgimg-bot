@@ -12,9 +12,17 @@ from telegram.error import BadRequest, RetryAfter
 
 from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
-from models import GuardEvent
+from models import GuardEvent, GuardRecord
 from registries import engine
-from services.moderation import actions, reviews, rules, runtime, store, verification
+from services.moderation import (
+    actions,
+    reviews,
+    rules,
+    runtime,
+    store,
+    verification,
+    worker,
+)
 from services.moderation.schemas import ActionRequest, Policy, Rule
 
 
@@ -142,6 +150,32 @@ async def test_each_action_requires_its_telegram_right(
     assert result["status"] == "failed"
     assert right in result["data"]["error"]
     getattr(guard_bot, method).assert_not_awaited()
+
+
+async def test_promoted_admin_can_clear_managed_warning_and_mute(
+    guard_group, guard_bot
+):
+    for request_id in ("warn-1", "warn-2", "warn-3"):
+        warning = await actions.execute(
+            guard_bot,
+            guard_group,
+            ActionRequest(action="warn", user_id=2, request_id=request_id),
+            actor_id=1,
+        )
+    assert await store.record(guard_group, "restriction", "2")
+
+    guard_bot.admin_ids.add(2)
+    guard_bot.rights["can_restrict_members"] = False
+    guard_bot.restrict_chat_member.reset_mock()
+    result = await actions.revoke_warning(
+        guard_bot, guard_group, warning["id"], actor_id=1
+    )
+
+    assert result["status"] == "success"
+    assert result["data"]["unmute"]["status"] == "success"
+    assert len(await store.warnings(guard_group, 2)) == 2
+    assert await store.record(guard_group, "restriction", "2") is None
+    guard_bot.restrict_chat_member.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -362,6 +396,31 @@ async def test_review_concurrency_executes_one_punishment(guard_group, guard_bot
     assert sum(isinstance(result, ValueError) for result in results) == 1
     guard_bot.delete_message.assert_awaited_once_with(guard_group, 10)
     assert len(await store.warnings(guard_group, 2)) == 1
+
+
+async def test_recovered_review_can_be_manually_checked_and_closed(
+    guard_group, guard_bot
+):
+    row = await reviews.create(
+        guard_group, "report:10", {"kind": "message", "user_id": 2, "message_id": 10}
+    )
+    async with engine.new_session() as session:
+        record = await session.get(GuardRecord, row["id"])
+        record.data = record.data | {"state": "processing"}
+        await session.commit()
+
+    await worker.Worker(guard_bot).recover()
+    recovered = await store.record(guard_group, "review", "report:10")
+    assert recovered["data"]["state"] == "uncertain"
+    with pytest.raises(ValueError, match="只能在人工核查后关闭"):
+        await reviews.decide(
+            guard_bot, guard_group, row["id"], "punish", "spam", actor_id=1
+        )
+
+    closed = await reviews.decide(
+        guard_bot, guard_group, row["id"], "dismiss", "人工核查完成", actor_id=1
+    )
+    assert closed["data"]["state"] == "resolved"
 
 
 async def test_edited_message_review_does_not_punish_new_content(

@@ -1,8 +1,20 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text, JSON, func, Index
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 
 from configs import config as file_config
+
 from .base import Base
 
 

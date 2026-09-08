@@ -153,6 +153,7 @@ export interface GuardTask {
   state: string;
   due_at: string;
   result: string | null;
+  completed_at: string | null;
   data: Record<string, unknown>;
 }
 const base = (id: number) => `/groups/${id}/guard`;

@@ -1,13 +1,13 @@
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from configs import config as file_config
-
 
 logger = logging.getLogger(__name__)
 
@@ -257,14 +257,49 @@ async def _add_moderation_state(conn: AsyncConnection) -> None:
     }
     for suffix, definitions in additions.items():
         table = f"{file_config.db_prefix}{suffix}"
-        columns = await conn.run_sync(lambda c: {x["name"] for x in inspect(c).get_columns(table)})
+        columns = await conn.run_sync(
+            lambda connection, table_name=table: {
+                column["name"]
+                for column in inspect(connection).get_columns(table_name)
+            }
+        )
         for name, definition in definitions.items():
             if name not in columns:
-                await conn.execute(text(f"ALTER TABLE {_quote(table)} ADD COLUMN {_quote(name)} {definition}"))
+                await conn.execute(
+                    text(
+                        f"ALTER TABLE {_quote(table)} "
+                        f"ADD COLUMN {_quote(name)} {definition}"
+                    )
+                )
+
+
+async def _add_guard_task_completion_time(conn: AsyncConnection) -> None:
+    table = f"{file_config.db_prefix}guard_tasks"
+    columns = await conn.run_sync(
+        lambda connection: {
+            column["name"] for column in inspect(connection).get_columns(table)
+        }
+    )
+    if "completed_at" not in columns:
+        await conn.execute(
+            text(
+                f"ALTER TABLE {_quote(table)} "
+                "ADD COLUMN `completed_at` DATETIME NULL"
+            )
+        )
+    await conn.execute(
+        text(
+            f"UPDATE {_quote(table)} SET `completed_at` = :completed_at "
+            "WHERE `completed_at` IS NULL "
+            "AND `state` IN ('done', 'failed', 'cancelled', 'missed')"
+        ),
+        {"completed_at": datetime.now(timezone.utc).replace(tzinfo=None)},
+    )
 
 
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "Add durable moderation policy and verification state", _add_moderation_state),
+    Migration(5, "Track moderation task terminal transitions", _add_guard_task_completion_time),
     Migration(
         version=1,
         name="Expand Telegram ID columns to BIGINT",

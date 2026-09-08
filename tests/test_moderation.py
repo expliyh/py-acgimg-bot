@@ -503,6 +503,22 @@ async def test_migrate_group_state():
     assert await store.record(GROUP - 1, "exempt", "2")
 
 
+async def test_migrate_invalidates_cached_keyword_rules_for_both_group_ids():
+    new_id = GROUP - 1
+    await group_guard.add_keyword_rule(GROUP, "spam")
+    assert await group_guard.list_keyword_rules(new_id) == []
+    assert [row.pattern for row in await group_guard.list_keyword_rules(GROUP)] == [
+        "spam"
+    ]
+
+    await runtime.migrate(GROUP, new_id)
+
+    assert await group_guard.list_keyword_rules(GROUP) == []
+    assert [row.pattern for row in await group_guard.list_keyword_rules(new_id)] == [
+        "spam"
+    ]
+
+
 async def test_migrate_keeps_new_target_rows_on_natural_key_collision():
     new_id = GROUP - 1
     await store.put_record(GROUP, "message", "7", {"version": "old"})
@@ -609,6 +625,28 @@ async def test_sqlite_legacy_migration_is_repeatable():
             )
         ).one()
         assert row == (1, None)
+
+
+async def test_task_completion_migration_backfills_terminal_rows_repeatably():
+    table = schema_migrator._quote(GuardTask.__tablename__)
+    async with engine.engine.begin() as conn:
+        await conn.execute(text(f"DROP TABLE {table}"))
+        await conn.execute(
+            text(
+                f"CREATE TABLE {table} ("
+                "id VARCHAR(32) PRIMARY KEY, state VARCHAR(24) NOT NULL)"
+            )
+        )
+        await conn.execute(
+            text(f"INSERT INTO {table} (id, state) VALUES ('old-task', 'done')")
+        )
+        await schema_migrator._add_guard_task_completion_time(conn)
+        await schema_migrator._add_guard_task_completion_time(conn)
+        assert (
+            await conn.execute(
+                text(f"SELECT completed_at FROM {table} WHERE id = 'old-task'")
+            )
+        ).scalar_one() is not None
 
 
 async def test_guard_api_settings_secret_and_isolation(monkeypatch):

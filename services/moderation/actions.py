@@ -105,16 +105,18 @@ async def execute(
                 group_id, "exempt", str(request.user_id)
             ):
                 raise ValueError("成员已豁免，取消过时处罚")
-        if (
+        target_is_admin = bool(
             request.user_id
-            and request.action != "unban"
             and (
                 request.user_id == bot.id
                 or await is_admin(bot, group_id, request.user_id)
             )
-        ):
+        )
+        if target_is_admin and request.action not in {"unban", "unwarn", "unmute"}:
             raise ValueError("不能处罚群主、管理员或本机器人")
-        result = await _execute_locked(bot, group_id, request, source)
+        result = await _execute_locked(
+            bot, group_id, request, source, target_is_admin=target_is_admin
+        )
         if request.action == "warn" and result["status"] == "success":
             settings = await store.policy(group_id)
             active = await store.warnings(group_id, request.user_id)
@@ -139,7 +141,7 @@ async def execute(
         return result
 
 
-async def _execute_locked(bot, group_id, req, source):
+async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
     row, fresh = await store.event(
         group_id,
         req.action,
@@ -174,7 +176,11 @@ async def _execute_locked(bot, group_id, req, source):
                 await session.commit()
             data["revoked_event"] = target["id"]
         elif req.action in {"mute", "unmute", "kick", "ban", "unban"}:
-            await require_right(bot, group_id, "can_restrict_members")
+            # A promoted administrator no longer accepts member restrictions.  Clearing
+            # our stale bookkeeping is still safe and must not depend on a Telegram
+            # permission that is no longer used for this path.
+            if not (req.action == "unmute" and target_is_admin):
+                await require_right(bot, group_id, "can_restrict_members")
             if req.action == "mute":
                 existing = await store.record(group_id, "restriction", str(req.user_id))
                 if existing:
@@ -230,7 +236,8 @@ async def _execute_locked(bot, group_id, req, source):
                             raise ValueError("没有本系统可解除的禁言记录")
                         snapshot = pending.original_permissions or {}
                         token = pending.token
-                    await restore_permissions(bot, group_id, req.user_id, snapshot)
+                    if not target_is_admin:
+                        await restore_permissions(bot, group_id, req.user_id, snapshot)
                     async with engine.new_session() as session:
                         await session.execute(
                             update(Pending)
@@ -241,11 +248,15 @@ async def _execute_locked(bot, group_id, req, source):
                     return await store.finish_event(
                         row["id"], "success", {"verification": "cancelled"}
                     )
-                if restriction["data"].get("state") == "external":
+                if (
+                    not target_is_admin
+                    and restriction["data"].get("state") == "external"
+                ):
                     raise ValueError("成员权限已被其他管理员修改，无法自动恢复")
-                await restore_permissions(
-                    bot, group_id, req.user_id, restriction["data"]["original"]
-                )
+                if not target_is_admin:
+                    await restore_permissions(
+                        bot, group_id, req.user_id, restriction["data"]["original"]
+                    )
                 await store.remove_record(group_id, "restriction", str(req.user_id))
             elif req.action == "kick":
                 ban_until = datetime.now(timezone.utc) + timedelta(minutes=1)

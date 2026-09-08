@@ -1,15 +1,15 @@
 ﻿from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from handlers.registry import bot_handler
-from registries import group_registry
 from services import group_guard
 from services.command_history import command_logger
-from services.telegram_cache import get_cached_admin_ids
+from services.moderation.actions import is_admin
 from utils import is_group_type
 
 
@@ -19,8 +19,6 @@ async def _ensure_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     if chat is None or user is None:
         return False
 
-    from services.moderation.actions import is_admin
-    from telegram.error import TelegramError
     if update.effective_message and update.effective_message.sender_chat:
         return False
     try:

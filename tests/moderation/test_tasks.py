@@ -291,9 +291,45 @@ async def test_retention_preserves_effective_warnings_and_uncertain_tasks(
             .values(created_at=store.now() - timedelta(days=15))
         )
         await session.execute(
-            update(GuardTask).values(created_at=store.now() - timedelta(days=15))
+            update(GuardTask)
+            .where(GuardTask.id.in_([done, failed]))
+            .values(
+                created_at=store.now() - timedelta(days=15),
+                completed_at=store.now() - timedelta(days=15),
+            )
+        )
+        await session.execute(
+            update(GuardTask)
+            .where(GuardTask.id == uncertain)
+            .values(created_at=store.now() - timedelta(days=15))
         )
         await session.commit()
     await worker.Worker(guard_bot).cleanup()
     assert [row["id"] for row in await store.warnings(guard_group, 2)] == [recent["id"]]
     assert [row["id"] for row in await jobs()] == [uncertain]
+
+
+async def test_retention_starts_when_a_long_scheduled_task_finishes(
+    guard_group, guard_bot
+):
+    await store.save_policy(guard_group, {"log_days": 7})
+    task_id = await store.task(
+        guard_group,
+        "announcement",
+        store.now() + timedelta(days=30),
+        {},
+    )
+    async with engine.new_session() as session:
+        await session.execute(
+            update(GuardTask)
+            .where(GuardTask.id == task_id)
+            .values(created_at=store.now() - timedelta(days=30))
+        )
+        await session.commit()
+
+    await worker.set_state(task_id, "done")
+    await worker.Worker(guard_bot).cleanup()
+
+    task = next(row for row in await jobs() if row["id"] == task_id)
+    assert task["state"] == "done"
+    assert task["completed_at"] is not None

@@ -49,3 +49,4 @@ class GuardTask(Base):
     data = Column(JSON, nullable=False, default=dict)
     result = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)

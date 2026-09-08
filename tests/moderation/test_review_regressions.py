@@ -184,8 +184,11 @@ async def test_telegram_content_removal_cancels_announcement_task(
 
 def test_content_names_are_trimmed_and_must_not_be_blank():
     assert Content(kind="reply", name="  trigger  ", text="hello").name == "trigger"
+    assert Content(kind="reply", name="trigger", text="  hello  ").text == "hello"
     with pytest.raises(ValueError, match="内容名称不能为空"):
         Content(kind="reply", name=" \t ", text="hello")
+    with pytest.raises(ValueError, match="内容正文不能为空"):
+        Content(kind="reply", name="trigger", text=" \n\t ")
     with pytest.raises(ValueError, match="不能包含斜杠"):
         Content(kind="reply", name="path/segment", text="hello")
 
@@ -485,7 +488,17 @@ async def test_cleanup_discovers_task_only_groups(guard_group, guard_bot):
     async with engine.new_session() as session:
         assert await session.scalar(select(GuardEvent)) is None
         await session.execute(
-            update(GuardTask).values(created_at=store.now() - timedelta(days=8))
+            update(GuardTask)
+            .where(GuardTask.id == ended)
+            .values(
+                created_at=store.now() - timedelta(days=8),
+                completed_at=store.now() - timedelta(days=8),
+            )
+        )
+        await session.execute(
+            update(GuardTask)
+            .where(GuardTask.id == uncertain)
+            .values(created_at=store.now() - timedelta(days=8))
         )
         await session.commit()
     await worker.Worker(guard_bot).cleanup()
