@@ -1,5 +1,5 @@
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
 from telegram import ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
@@ -141,7 +141,11 @@ async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
                 text = "成员已成为管理员，验证结束"
             elif expired:
                 if settings.kick_on_timeout:
-                    await bot.ban_chat_member(group_id, user_id)
+                    await bot.ban_chat_member(
+                        group_id,
+                        user_id,
+                        until_date=datetime.now(timezone.utc) + timedelta(minutes=1),
+                    )
                     await bot.unban_chat_member(group_id, user_id, only_if_banned=True)
                     status, text = "removed", "验证超时，已移出群组"
                 else:

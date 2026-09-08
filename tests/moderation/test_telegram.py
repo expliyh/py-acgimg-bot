@@ -14,7 +14,7 @@ from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent
 from registries import engine
-from services.moderation import actions, reviews, runtime, store, verification
+from services.moderation import actions, reviews, rules, runtime, store, verification
 from services.moderation.schemas import ActionRequest, Policy, Rule
 
 
@@ -89,6 +89,35 @@ async def test_failed_admin_lookup_is_negatively_cached(
             SimpleNamespace(bot=guard_bot),
         )
     guard_bot.get_chat_administrators.assert_awaited_once_with(guard_group)
+    guard_bot.delete_message.assert_not_awaited()
+
+
+async def test_failed_admin_lookup_still_records_edited_version(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"rules_enabled": True})
+    original = guard_message(text="old")
+    await store.put_record(
+        guard_group,
+        "message",
+        str(original.message_id),
+        {
+            "version": rules.version(original),
+            "timestamp": original.date.timestamp(),
+        },
+    )
+    guard_bot.get_chat_administrators.side_effect = BadRequest("unavailable")
+    edited = guard_message(
+        text="new",
+        edit_date=int(original.date.timestamp()) + 1,
+    )
+
+    await runtime.preprocess(
+        Update(3, edited_message=edited), SimpleNamespace(bot=guard_bot)
+    )
+
+    saved = await store.record(guard_group, "message", str(original.message_id))
+    assert saved["data"]["version"] == rules.version(edited)
     guard_bot.delete_message.assert_not_awaited()
 
 

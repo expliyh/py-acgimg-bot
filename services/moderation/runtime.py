@@ -90,6 +90,8 @@ async def preprocess(update, context):
             return
         admin_ids = await get_cached_admin_ids(context, chat.id)
         if admin_ids is None or user_id in admin_ids:
+            if message.edit_date:
+                await remember_message(chat.id, message)
             return  # Cannot safely classify an unknown administrator as an ordinary member.
         exempt = await store.record(chat.id, "exempt", str(user_id))
         if exempt and exempt["enabled"]:

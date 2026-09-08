@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select, update
 from telegram import User
-from telegram.error import TimedOut
+from telegram.error import BadRequest, TimedOut
 
 from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent, GuardTask
@@ -40,7 +40,14 @@ async def test_restart_processes_expired_verification_once(guard_group, guard_bo
     await restarted.recover()
     await restarted.tick()
     await restarted.tick()
-    guard_bot.ban_chat_member.assert_awaited_once_with(guard_group, 2)
+    guard_bot.ban_chat_member.assert_awaited_once()
+    assert guard_bot.ban_chat_member.call_args.args == (guard_group, 2)
+    ban_until = guard_bot.ban_chat_member.call_args.kwargs["until_date"]
+    assert (
+        datetime.now(timezone.utc)
+        < ban_until
+        <= datetime.now(timezone.utc) + timedelta(minutes=1)
+    )
     guard_bot.unban_chat_member.assert_awaited_once_with(
         guard_group, 2, only_if_banned=True
     )
@@ -185,6 +192,18 @@ async def test_ambiguous_send_is_never_automatically_retried(guard_group, guard_
     await restarted.tick()
     guard_bot.send_message.assert_awaited_once()
     assert (await jobs())[0]["state"] == "uncertain"
+
+
+async def test_deterministic_telegram_task_error_is_failed(guard_group, guard_bot):
+    task_id = await store.task(guard_group, "delete", store.now(), {"message_id": 404})
+    job = next(row for row in await jobs() if row["id"] == task_id)
+    guard_bot.delete_message.side_effect = BadRequest("message not found")
+
+    await worker.Worker(guard_bot).dispatch(job)
+
+    assert (
+        next(row for row in await jobs() if row["id"] == task_id)["state"] == "failed"
+    )
 
 
 async def test_recurring_announcement_continues_after_ambiguous_send(

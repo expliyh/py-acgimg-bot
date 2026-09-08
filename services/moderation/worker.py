@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select, update
-from telegram.error import TelegramError
+from telegram.error import NetworkError, TimedOut
 
 from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent, GuardRecord, GuardTask
@@ -339,7 +339,9 @@ class Worker:
             logger.exception("Moderation task %s failed", job["id"])
             await set_state(
                 job["id"],
-                "uncertain" if isinstance(exc, TelegramError) else "failed",
+                "uncertain"
+                if isinstance(exc, TimedOut) or type(exc) is NetworkError
+                else "failed",
                 type(exc).__name__,
             )
             await store.event(

@@ -205,6 +205,16 @@ async def test_announcement_input_requires_offset_and_persists_utc(api, guard_gr
     assert (await api.delete(root + "/contents/restriction/2")).status_code == 422
 
 
+async def test_content_name_rejects_path_separator(api, guard_group):
+    root = f"/api/groups/{guard_group}/guard"
+    response = await api.put(
+        root + "/contents",
+        json={"kind": "reply", "name": "path/segment", "text": "hello"},
+    )
+    assert response.status_code == 422
+    assert await store.record(guard_group, "reply", "path/segment") is None
+
+
 async def test_deleting_announcement_cancels_only_its_pending_tasks(api, guard_group):
     roots = [
         f"/api/groups/{guard_group}/guard",

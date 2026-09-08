@@ -19,7 +19,7 @@ _windows = defaultdict(deque)
 _last_sweep = 0.0
 
 
-def window(key, seconds: int, value=None) -> list:
+def window(key, seconds: int, value=None, *, deduplicate=False) -> list:
     global _last_sweep
     clock = time.monotonic()
     if clock - _last_sweep > 60:
@@ -30,7 +30,8 @@ def window(key, seconds: int, value=None) -> list:
     items = _windows[key]
     while items and items[0][0] <= clock - seconds:
         items.popleft()
-    items.append((clock, value))
+    if not deduplicate or all(entry[1] != value for entry in items):
+        items.append((clock, value))
     while len(items) > 2000:
         items.popleft()
     return [entry[1] for entry in items]
@@ -176,7 +177,12 @@ async def evaluate(message, settings):
             }
     if settings.flood_enabled and message.from_user and not message.edit_date:
         user_id = message.from_user.id
-        count = window((group_id, user_id, "flood"), settings.flood_window)
+        count = window(
+            (group_id, user_id, "flood"),
+            settings.flood_window,
+            message.media_group_id or message.message_id,
+            deduplicate=True,
+        )
         repeated = window(
             (group_id, user_id, "repeat"), settings.repeat_window, fingerprint(message)
         )

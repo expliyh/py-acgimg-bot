@@ -192,6 +192,8 @@ class Content(StrictModel):
         value = value.strip()
         if not value:
             raise ValueError("内容名称不能为空")
+        if "/" in value:
+            raise ValueError("内容名称不能包含斜杠")
         return value
 
     @model_validator(mode="after")

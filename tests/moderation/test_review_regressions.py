@@ -183,6 +183,8 @@ def test_content_names_are_trimmed_and_must_not_be_blank():
     assert Content(kind="reply", name="  trigger  ", text="hello").name == "trigger"
     with pytest.raises(ValueError, match="内容名称不能为空"):
         Content(kind="reply", name=" \t ", text="hello")
+    with pytest.raises(ValueError, match="不能包含斜杠"):
+        Content(kind="reply", name="path/segment", text="hello")
 
 
 async def test_distinct_attachment_only_polls_do_not_count_as_repeats(
@@ -215,6 +217,25 @@ async def test_distinct_attachment_only_polls_do_not_count_as_repeats(
     assert len({rules.fingerprint(value) for value in messages}) == 3
     for value in messages:
         assert await rules.evaluate(value, settings) is None
+
+
+async def test_media_album_counts_as_one_flood_message(guard_group, guard_message):
+    settings = Policy(flood_enabled=True, flood_limit=6, repeat_limit=50)
+    for index in range(7):
+        item = guard_message(
+            message_id=30 + index,
+            text=None,
+            media_group_id="album-1",
+            photo=[
+                {
+                    "file_id": f"photo-{index}",
+                    "file_unique_id": f"unique-{index}",
+                    "width": 100,
+                    "height": 100,
+                }
+            ],
+        )
+        assert await rules.evaluate(item, settings) is None
 
 
 async def test_combined_rule_reason_fits_action_request(guard_group, guard_message):
