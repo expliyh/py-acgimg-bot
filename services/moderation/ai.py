@@ -119,11 +119,19 @@ async def classify(config, settings, text, image=None, grading=None):
         if len(raw) > MAX_RESPONSE_BYTES:
             raise ValueError("模型响应过大")
         payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("模型响应必须为对象")
     value = payload["choices"][0]["message"]
+    if not isinstance(value, dict):
+        raise ValueError("模型消息必须为对象")
     if value.get("refusal"):
         raise ValueError("模型拒绝审核")
     verdict = AIVerdict.model_validate_json(value["content"])
     usage = payload.get("usage", {})
+    if usage is None:
+        usage = {}
+    if not isinstance(usage, dict):
+        raise ValueError("模型用量必须为对象")
     usage = {
         key: int(value)
         for key, value in usage.items()
@@ -245,6 +253,8 @@ async def process(bot, job):
                 TelegramError,
                 TimeoutError,
                 UnidentifiedImageError,
+                Image.DecompressionBombError,
+                Image.DecompressionBombWarning,
                 OSError,
             ) as exc:
                 image_failure = exc
@@ -330,6 +340,8 @@ async def process(bot, job):
         TelegramError,
         TimeoutError,
         UnidentifiedImageError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
         OSError,
     ) as exc:
         await store.finish_event(event["id"], "failed", {"error": type(exc).__name__})

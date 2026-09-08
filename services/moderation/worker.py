@@ -137,8 +137,10 @@ class Worker:
                     )
                 )
             ).all()
+            # Older workers did not persist a phase, so absence is not proof that
+            # Telegram-side punishment had not begun.
             retryable_ai = [
-                task for task in interrupted_ai if task.result != "moderating"
+                task for task in interrupted_ai if task.result == "classifying"
             ]
             for task in retryable_ai:
                 message = task.data.get("message") or {}
@@ -418,6 +420,7 @@ class Worker:
                             request_id=f"expire:{data['event_id']}",
                         ),
                         source="scheduler",
+                        expected_restriction_id=data["event_id"],
                     )
                     if result["status"] != "success":
                         await set_state(

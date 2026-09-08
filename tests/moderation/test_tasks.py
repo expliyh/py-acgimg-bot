@@ -28,6 +28,62 @@ async def jobs():
         ]
 
 
+@pytest.mark.parametrize("lost_rights", [False, True])
+async def test_rejected_second_mute_preserves_original_expiration(
+    guard_group, guard_bot, lost_rights
+):
+    first = await actions.execute(
+        guard_bot, guard_group,
+        ActionRequest(action="mute", user_id=2, request_id="original-mute"),
+    )
+    original = await store.record(guard_group, "restriction", "2")
+    assert first["status"] == "success"
+    if lost_rights:
+        guard_bot.rights["can_restrict_members"] = False
+    second = await actions.execute(
+        guard_bot, guard_group,
+        ActionRequest(action="mute", user_id=2, request_id="second-mute"),
+    )
+    assert second["status"] == "failed"
+    assert await store.record(guard_group, "restriction", "2") == original
+    guard_bot.restrict_chat_member.assert_awaited_once()
+    guard_bot.rights["can_restrict_members"] = True
+    await worker.Worker(guard_bot).dispatch((await jobs())[0])
+    assert await store.record(guard_group, "restriction", "2") is None
+    assert guard_bot.restrict_chat_member.await_count == 2
+
+
+async def test_expiration_rechecks_restriction_after_entering_action_lock(
+    guard_group, guard_bot, monkeypatch
+):
+    execute = actions.execute
+    await execute(
+        guard_bot, guard_group,
+        ActionRequest(action="mute", user_id=2, request_id="first"),
+    )
+    old_job = (await jobs())[0]
+    replacement = None
+
+    async def replace_before_lock(bot, group_id, request, **kwargs):
+        nonlocal replacement
+        await execute(
+            bot, group_id,
+            ActionRequest(action="unmute", user_id=2, request_id="manual-release"),
+        )
+        replacement = await execute(
+            bot, group_id,
+            ActionRequest(action="mute", user_id=2, request_id="replacement"),
+        )
+        guard_bot.restrict_chat_member.reset_mock()
+        return await execute(bot, group_id, request, **kwargs)
+
+    monkeypatch.setattr(actions, "execute", replace_before_lock)
+    await worker.Worker(guard_bot).dispatch(old_job)
+    guard_bot.restrict_chat_member.assert_not_awaited()
+    current = await store.record(guard_group, "restriction", "2")
+    assert current["data"]["event_id"] == replacement["id"]
+
+
 async def test_restart_processes_expired_verification_once(guard_group, guard_bot):
     await verification.start(
         guard_bot, guard_group, User(2, "New", False), "Group", Policy()
@@ -351,12 +407,18 @@ async def test_recovery_retries_ai_classification_before_external_actions(
         assert event.status == "success"
 
 
+@pytest.mark.parametrize("phase", ["moderating", "", None])
 async def test_recovery_preserves_ai_ambiguity_after_moderation_begins(
-    guard_group, guard_bot, guard_ai_job
+    guard_group, guard_bot, guard_ai_job, phase
 ):
     job = await guard_ai_job()
     task_id = await store.task(guard_group, "ai", store.now(), job["data"])
     await worker.set_state(task_id, "running", "moderating")
+    async with engine.new_session() as session:
+        await session.execute(
+            update(GuardTask).where(GuardTask.id == task_id).values(result=phase)
+        )
+        await session.commit()
     await store.event(
         guard_group,
         "ai",

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import warnings
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,7 +15,7 @@ from sqlalchemy import select
 
 from models import Group, GuardEvent
 from registries import engine
-from services.moderation import ai, store
+from services.moderation import ai, store, worker
 from services.moderation.schemas import AIConfig, AIVerdict, Policy
 
 
@@ -65,6 +66,85 @@ async def test_image_rejects_oversized_or_invalid_downloads(
         await ai.image_data(guard_bot, message)
     if failure == "declared_size":
         guard_bot.get_file.assert_not_awaited()
+
+
+@pytest.mark.parametrize("pixel_limit", [10, 20])
+@pytest.mark.parametrize("caption", [None, "ordinary caption"])
+async def test_pillow_bomb_finalizes_event_or_checks_caption(
+    guard_group, guard_bot, guard_ai_job, monkeypatch, pixel_limit, caption
+):
+    source = io.BytesIO()
+    Image.new("RGB", (5, 5)).save(source, "PNG")
+    # Exercise Pillow's real header check without allocating a huge bitmap.
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", pixel_limit)
+    guard_bot.get_file.return_value.download_as_bytearray = AsyncMock(
+        return_value=source.getvalue()
+    )
+    job = await guard_ai_job(
+        policy={"ai_spam": True, "ai_images": True},
+        text=None,
+        caption=caption,
+        document={
+            "file_id": "oversized-image",
+            "file_unique_id": "oversized",
+            "mime_type": "image/png",
+        },
+    )
+    classifier = AsyncMock(
+        return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {})
+    )
+    monkeypatch.setattr(ai, "classify", classifier)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        assert await ai.process(guard_bot, job) == ("allow" if caption else "failed")
+    if caption:
+        classifier.assert_awaited_once()
+        assert classifier.call_args.args[2:4] == (caption, None)
+        assert not classifier.call_args.args[1].ai_images
+    else:
+        classifier.assert_not_awaited()
+    await worker.Worker(guard_bot).recover()
+    async with engine.new_session() as session:
+        event = await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai"))
+        assert event.status == ("success" if caption else "failed")
+    guard_bot.delete_message.assert_not_awaited()
+    assert await store.warnings(guard_group, 2) == []
+
+
+@pytest.mark.parametrize("shape", ["null_usage", "list_usage", "null_message", "list_payload"])
+async def test_provider_shapes_leave_no_running_event(
+    guard_group, guard_bot, guard_ai_job, shape
+):
+    job = await guard_ai_job()
+
+    async def respond(request):
+        payload = {
+            "choices": [{"message": {"content": json.dumps(
+                {"category": "safe", "confidence": 1, "reason": "safe"}
+            )}}],
+            "usage": None if shape == "null_usage" else [],
+        }
+        if shape == "null_message":
+            payload["choices"][0]["message"] = None
+        if shape == "list_payload":
+            payload = []
+        return web.json_response(payload)
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", respond)
+    async with TestServer(app) as server:
+        await store.save_ai_config(AIConfig(
+            base_url=str(server.make_url("/v1")), text_model="test"
+        ))
+        assert await ai.process(guard_bot, job) == (
+            "allow" if shape == "null_usage" else "failed"
+        )
+    await worker.Worker(guard_bot).recover()
+    async with engine.new_session() as session:
+        event = await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai"))
+        assert event.status == ("success" if shape == "null_usage" else "failed")
+    guard_bot.delete_message.assert_not_awaited()
+    assert await store.warnings(guard_group, 2) == []
 
 
 @pytest.mark.parametrize(

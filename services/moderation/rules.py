@@ -97,8 +97,8 @@ def links(message) -> list[str]:
 
 
 def host(url: str) -> str:
-    parsed = urlparse(url if "://" in url else "https://" + url)
     try:
+        parsed = urlparse(url if "://" in url else "https://" + url)
         return (parsed.hostname or "").rstrip(".").encode("idna").decode().lower()
     except (UnicodeError, ValueError):
         return ""

@@ -83,11 +83,19 @@ async def execute(
     actor_id=None,
     source="web:deployment-admin",
     expected=None,
+    expected_restriction_id=None,
 ) -> dict:
     if bot is None:
         raise ValueError("Telegram 机器人尚未连接")
     async with store.lock(group_id):
         await require_admin(bot, group_id, actor_id)
+        if expected_restriction_id is not None:
+            restriction = await store.record(group_id, "restriction", str(request.user_id))
+            if (
+                not restriction
+                or restriction["data"].get("event_id") != expected_restriction_id
+            ):
+                raise ValueError("限制记录已改变，取消过时解禁")
         if expected:
             latest = await store.record(group_id, "message", str(request.message_id))
             expected_version = expected.get("version")
@@ -353,7 +361,9 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
         data["error"] = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         status = "uncertain" if is_uncertain_error(exc) else "failed"
         if req.action == "mute" and status == "failed":
-            await store.remove_record(group_id, "restriction", str(req.user_id))
+            restriction = await store.record(group_id, "restriction", str(req.user_id))
+            if restriction and restriction["data"].get("event_id") == row["id"]:
+                await store.remove_record(group_id, "restriction", str(req.user_id))
         return await store.finish_event(row["id"], status, data)
 
 
@@ -468,5 +478,6 @@ async def revoke_warning(
             ),
             actor_id=actor_id,
             source=source,
+            expected_restriction_id=restriction["data"]["event_id"],
         )
     return result

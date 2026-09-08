@@ -346,6 +346,23 @@ def test_rule_names_are_safe_api_path_segments():
         validate_record_name("x" * 101, "规则名称")
 
 
+@pytest.mark.parametrize("url", ["https://[broken/path", "https://[not-an-ip]/"])
+async def test_malformed_url_cannot_abort_link_moderation(
+    guard_group, guard_bot, guard_message, url
+):
+    from telegram.ext import ApplicationHandlerStop
+
+    await store.save_policy(guard_group, {"rules_enabled": True})
+    await store.put_record(guard_group, "rule", "links", Rule(kind="link").model_dump())
+    with pytest.raises(ApplicationHandlerStop):
+        await runtime.preprocess(
+            Update(1, message=guard_message(text=url)),
+            SimpleNamespace(bot=guard_bot),
+        )
+    guard_bot.delete_message.assert_awaited_once_with(guard_group, 10)
+    assert len(await store.warnings(guard_group, 2)) == 1
+
+
 async def test_migrate_from_service_message_moves_guard_state(
     guard_group, guard_bot, guard_message
 ):
