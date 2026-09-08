@@ -20,6 +20,7 @@ LEGACY = {
     "kick_on_timeout",
     "keyword_filter_enabled",
 }
+TEMPORARY_RECORD_KINDS = {"message", "join_seen"}
 
 
 def lock(group_id: int):
@@ -112,6 +113,7 @@ async def record(group_id: int, kind: str, key: str) -> dict | None:
 async def put_record(
     group_id: int, kind: str, key: str, data: dict, enabled=True
 ) -> dict:
+    observed_at = now()
     async with engine.new_session() as session:
         row = await session.scalar(
             select(GuardRecord).where(
@@ -122,9 +124,15 @@ async def put_record(
         )
         if row is None:
             row = GuardRecord(
-                id=uid(), group_id=group_id, kind=kind, key=key, created_at=now()
+                id=uid(),
+                group_id=group_id,
+                kind=kind,
+                key=key,
+                created_at=observed_at,
             )
             session.add(row)
+        elif kind in TEMPORARY_RECORD_KINDS:
+            row.created_at = observed_at
         row.data, row.enabled = json_data(data), enabled
         result = dump(row)
         try:
@@ -140,6 +148,8 @@ async def put_record(
             )
             if row is None:
                 raise
+            if kind in TEMPORARY_RECORD_KINDS:
+                row.created_at = observed_at
             row.data, row.enabled = json_data(data), enabled
             result = dump(row)
             await session.commit()

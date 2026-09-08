@@ -130,6 +130,17 @@ class Worker:
 
     async def recover(self):
         async with engine.new_session() as session:
+            interrupted_announcements = [
+                store.dump(row)
+                for row in (
+                    await session.scalars(
+                        select(GuardTask).where(
+                            GuardTask.kind == "announcement",
+                            GuardTask.state == "running",
+                        )
+                    )
+                ).all()
+            ]
             await session.execute(
                 update(GuardTask)
                 .where(GuardTask.state == "running")
@@ -186,6 +197,14 @@ class Worker:
                     .order_by(GuardTask.created_at, GuardTask.id)
                 )
             ).all()
+            pending_announcements = (
+                await session.scalars(
+                    select(GuardTask).where(
+                        GuardTask.kind == "announcement",
+                        GuardTask.state == "pending",
+                    )
+                )
+            ).all()
 
             def identity(group_id, kind, data):
                 return (
@@ -233,7 +252,10 @@ class Worker:
                     {"user_id": row["user_id"], "token": row["token"]},
                 )
             for row in restrictions:
-                if row["data"].get("deadline") and row["data"].get("state") == "active":
+                if row["data"].get("deadline") and row["data"].get("state") in {
+                    "active",
+                    "applying",
+                }:
                     restore_timeout(
                         row["group_id"],
                         "unmute",
@@ -243,6 +265,40 @@ class Worker:
                             "event_id": row["data"]["event_id"],
                         },
                     )
+            for job in interrupted_announcements:
+                record = await session.scalar(
+                    select(GuardRecord).where(
+                        GuardRecord.group_id == job["group_id"],
+                        GuardRecord.kind == "announcement",
+                        GuardRecord.key == job["data"].get("name"),
+                    )
+                )
+                if (
+                    not record
+                    or not record.enabled
+                    or record.data != job["data"].get("revision")
+                ):
+                    continue
+                try:
+                    value = Content.model_validate(record.data)
+                except ValueError:
+                    continue
+                if value.repeat == "once" or any(
+                    task.group_id == job["group_id"] and task.data == job["data"]
+                    for task in pending_announcements
+                ):
+                    continue
+                successor = GuardTask(
+                    id=store.uid(),
+                    group_id=job["group_id"],
+                    kind="announcement",
+                    due_at=next_occurrence(job["due_at"], value.repeat, value.timezone),
+                    data=job["data"],
+                    state="pending",
+                    created_at=store.now(),
+                )
+                session.add(successor)
+                pending_announcements.append(successor)
             await session.commit()
 
     async def run(self):

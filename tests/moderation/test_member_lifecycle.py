@@ -312,6 +312,31 @@ async def test_recovery_recreates_only_missing_pending_task(
         )
 
 
+async def test_recovery_restores_unmute_task_for_applying_restriction(
+    guard_group, guard_bot, timeout_job
+):
+    original = await timeout_job("unmute")
+    restriction = await store.record(guard_group, "restriction", "2")
+    await store.put_record(
+        guard_group,
+        "restriction",
+        "2",
+        restriction["data"] | {"state": "applying"},
+    )
+    async with engine.new_session() as session:
+        await session.execute(delete(GuardTask).where(GuardTask.id == original["id"]))
+        await session.commit()
+
+    await worker.Worker(guard_bot).recover()
+    await worker.Worker(guard_bot).recover()
+
+    pending = [row for row in await timers(guard_group) if row["state"] == "pending"]
+    assert len(pending) == 1
+    assert pending[0]["kind"] == "unmute"
+    assert pending[0]["data"] == original["data"]
+    assert pending[0]["due_at"] == original["due_at"]
+
+
 @pytest.mark.parametrize("kind", ["verify", "unmute"])
 async def test_recovery_collapses_old_duplicates_without_mixing_members_or_groups(
     guard_group, guard_bot, timeout_job, kind

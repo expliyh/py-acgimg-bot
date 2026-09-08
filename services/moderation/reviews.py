@@ -119,11 +119,17 @@ async def decide(
                 else bot.decline_chat_join_request
             )
             await method(group_id, data["user_id"])
-        status = (
-            "resolved" if all(r["status"] == "success" for r in results) else "failed"
-        )
+        statuses = {result.get("status") for result in results}
+        if "uncertain" in statuses:
+            status = "uncertain"
+        else:
+            status = (
+                "resolved"
+                if all(result.get("status") == "success" for result in results)
+                else "failed"
+            )
     except (ValueError, TelegramError) as exc:
-        status = "failed"
+        status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
         results = [
             {"error": str(exc) if isinstance(exc, ValueError) else type(exc).__name__}
         ]

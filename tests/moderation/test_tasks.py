@@ -231,6 +231,46 @@ async def test_recurring_announcement_continues_after_ambiguous_send(
     guard_bot.send_message.assert_awaited_once_with(guard_group, "hello")
 
 
+@pytest.mark.parametrize("successor_exists", [False, True])
+async def test_recovery_continues_claimed_recurring_announcement_without_resend(
+    guard_group, guard_bot, monkeypatch, successor_exists
+):
+    clock = utc_naive(2026, 9, 7, 12)
+    monkeypatch.setattr(store, "now", lambda: clock)
+    await worker.save_content(
+        guard_group,
+        Content(
+            kind="announcement",
+            name="daily",
+            text="hello",
+            due_at=clock.replace(tzinfo=timezone.utc),
+            repeat="daily",
+        ),
+    )
+    claimed = (await jobs())[0]
+    await worker.set_state(claimed["id"], "running")
+    if successor_exists:
+        await store.task(
+            guard_group,
+            "announcement",
+            utc_naive(2026, 9, 8, 12),
+            claimed["data"],
+        )
+
+    restarted = worker.Worker(guard_bot)
+    await restarted.recover()
+    await restarted.recover()
+
+    rows = await jobs()
+    assert (
+        next(row for row in rows if row["id"] == claimed["id"])["state"] == "uncertain"
+    )
+    pending = [row for row in rows if row["state"] == "pending"]
+    assert len(pending) == 1
+    assert pending[0]["due_at"] == utc_naive(2026, 9, 8, 12)
+    guard_bot.send_message.assert_not_awaited()
+
+
 async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
     guard_group, guard_bot, monkeypatch
 ):

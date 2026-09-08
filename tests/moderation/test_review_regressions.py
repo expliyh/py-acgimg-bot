@@ -479,6 +479,34 @@ async def test_cleanup_expires_temporary_records_without_audit_events(
         assert await store.record(guard_group, kind, "old")
 
 
+async def test_edit_refreshes_temporary_message_retention_age(guard_group, guard_bot):
+    original = await store.put_record(
+        guard_group,
+        "message",
+        "10",
+        {"version": "original", "timestamp": 1, "blocked": False},
+    )
+    async with engine.new_session() as session:
+        await session.execute(
+            update(GuardRecord)
+            .where(GuardRecord.id == original["id"])
+            .values(created_at=store.now() - timedelta(days=3))
+        )
+        await session.commit()
+
+    await store.put_record(
+        guard_group,
+        "message",
+        "10",
+        {"version": "edited", "timestamp": 2, "blocked": False},
+    )
+    await worker.Worker(guard_bot).cleanup()
+
+    retained = await store.record(guard_group, "message", "10")
+    assert retained["data"]["version"] == "edited"
+    assert retained["created_at"] > store.now() - timedelta(minutes=1)
+
+
 async def test_cleanup_discovers_task_only_groups(guard_group, guard_bot):
     await store.save_policy(guard_group, {"log_days": 7})
     ended = await store.task(guard_group, "delete", store.now(), {})

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select
 from telegram import Chat, Update, User
-from telegram.error import BadRequest, RetryAfter
+from telegram.error import BadRequest, RetryAfter, TimedOut
 
 from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
@@ -417,6 +417,42 @@ async def test_recovered_review_can_be_manually_checked_and_closed(
             guard_bot, guard_group, row["id"], "punish", "spam", actor_id=1
         )
 
+    closed = await reviews.decide(
+        guard_bot, guard_group, row["id"], "dismiss", "人工核查完成", actor_id=1
+    )
+    assert closed["data"]["state"] == "resolved"
+
+
+async def test_ambiguous_review_punishment_remains_manually_resolvable(
+    guard_group, guard_bot
+):
+    row = await reviews.create(
+        guard_group, "report:10", {"kind": "message", "user_id": 2, "message_id": 10}
+    )
+    guard_bot.delete_message.side_effect = TimedOut()
+
+    result = await reviews.decide(
+        guard_bot, guard_group, row["id"], "punish", "spam", actor_id=1
+    )
+
+    assert result["data"]["state"] == "uncertain"
+    closed = await reviews.decide(
+        guard_bot, guard_group, row["id"], "dismiss", "人工核查完成", actor_id=1
+    )
+    assert closed["data"]["state"] == "resolved"
+
+
+async def test_ambiguous_join_review_remains_manually_resolvable(
+    guard_group, guard_bot
+):
+    row = await reviews.create(guard_group, "join:2", {"kind": "join", "user_id": 2})
+    guard_bot.approve_chat_join_request.side_effect = TimedOut()
+
+    result = await reviews.decide(
+        guard_bot, guard_group, row["id"], "approve_join", "允许加入", actor_id=1
+    )
+
+    assert result["data"]["state"] == "uncertain"
     closed = await reviews.decide(
         guard_bot, guard_group, row["id"], "dismiss", "人工核查完成", actor_id=1
     )
