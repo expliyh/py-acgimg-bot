@@ -1,10 +1,10 @@
 """The only place that executes member punishments. All callers share checks and audit."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import update
 from telegram import ChatPermissions
-from telegram.error import NetworkError, TelegramError, TimedOut
+from telegram.error import NetworkError, RetryAfter, TelegramError, TimedOut
 
 from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent
@@ -243,8 +243,12 @@ async def _execute_locked(bot, group_id, req, source):
                 )
                 await store.remove_record(group_id, "restriction", str(req.user_id))
             elif req.action == "kick":
-                await bot.ban_chat_member(group_id, req.user_id)
+                ban_until = datetime.now(timezone.utc) + timedelta(minutes=1)
+                await bot.ban_chat_member(
+                    group_id, req.user_id, until_date=ban_until
+                )
                 data["ban"] = "success"
+                data["ban_until"] = ban_until.isoformat()
                 await bot.unban_chat_member(group_id, req.user_id, only_if_banned=True)
             elif req.action == "ban":
                 await bot.ban_chat_member(group_id, req.user_id)
@@ -270,6 +274,20 @@ async def _execute_locked(bot, group_id, req, source):
                 try:
                     await bot.delete_message(group_id, message_id)
                     deleted.append(message_id)
+                except RetryAfter as exc:
+                    failed.append(message_id)
+                    retry_after = exc.retry_after
+                    if isinstance(retry_after, timedelta):
+                        retry_after = retry_after.total_seconds()
+                    data = {
+                        "deleted": deleted,
+                        "failed": failed,
+                        "unattempted": [value for value in ids if value > message_id],
+                        "retry_after": retry_after,
+                    }
+                    return await store.finish_event(
+                        row["id"], "partial" if deleted else "failed", data
+                    )
                 except TelegramError:
                     failed.append(message_id)
             data = {"deleted": deleted, "failed": failed}

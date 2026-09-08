@@ -170,6 +170,11 @@ async def test_delete_failure_and_kick_partial_are_not_success(tg):
     result = await actions.execute(tg, GROUP, request(action="kick"))
     assert result["status"] == "uncertain"
     assert result["data"]["ban"] == "success"
+    ban_until = datetime.fromisoformat(result["data"]["ban_until"])
+    assert datetime.now(timezone.utc) < ban_until <= datetime.now(
+        timezone.utc
+    ) + timedelta(minutes=1)
+    assert tg.ban_chat_member.call_args.kwargs["until_date"] == ban_until
 
 
 async def test_unmute_preserves_group_defaults_and_external_changes(tg):
@@ -453,6 +458,37 @@ async def test_migrate_group_state():
     assert (await store.policy(GROUP - 1)).flood_enabled
     assert not (await store.policy(GROUP)).flood_enabled
     assert await store.record(GROUP - 1, "exempt", "2")
+
+
+async def test_migrate_overwrites_default_target_group_settings():
+    new_id = GROUP - 1
+    async with engine.new_session() as session:
+        session.add(
+            Group(
+                id=GROUP,
+                name="Old group",
+                enable=False,
+                enable_chat=True,
+                sanity_limit=6,
+                allow_r18g=True,
+                allow_setu=False,
+                admin_ids=[1, 2],
+            )
+        )
+        session.add(Group(id=new_id, name="Target defaults"))
+        await session.commit()
+
+    await runtime.migrate(GROUP, new_id)
+
+    async with engine.new_session() as session:
+        migrated = await session.get(Group, new_id)
+        assert migrated.name == "Old group"
+        assert migrated.enable is False
+        assert migrated.enable_chat is True
+        assert migrated.sanity_limit == 6
+        assert migrated.allow_r18g is True
+        assert migrated.allow_setu is False
+        assert migrated.admin_ids == [1, 2]
 
 
 async def test_sqlite_legacy_migration_is_repeatable():

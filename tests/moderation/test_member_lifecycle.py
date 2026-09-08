@@ -214,7 +214,7 @@ async def test_delayed_departure_does_not_clear_new_join_verification(
     ] == new_join.timestamp()
 
 
-async def test_real_permission_edit_preserves_external_restriction(
+async def test_real_permission_edit_retires_restriction_and_allows_new_mute(
     guard_group, guard_bot, guard_message
 ):
     message = guard_message()
@@ -223,24 +223,26 @@ async def test_real_permission_edit_preserves_external_restriction(
         guard_group,
         ActionRequest(action="mute", user_id=2, request_id="mute"),
     )
+    old_job = (await timers(guard_group))[0]
     old = restricted(message.from_user)
     await runtime.membership(
         membership(message, guard_bot, old, old | {"can_send_photos": True}, actor=1),
         SimpleNamespace(bot=guard_bot),
     )
-    record = await store.record(guard_group, "restriction", "2")
-    assert (
-        record["data"]["event_id"] == result["id"]
-        and record["data"]["state"] == "external"
-    )
+    assert await store.record(guard_group, "restriction", "2") is None
+    assert (await timers(guard_group))[0]["state"] == "cancelled"
+    assert old_job["data"]["event_id"] == result["id"]
     guard_bot.restrict_chat_member.reset_mock()
-    unmute = await actions.execute(
+    remute = await actions.execute(
         guard_bot,
         guard_group,
-        ActionRequest(action="unmute", user_id=2, request_id="unmute"),
+        ActionRequest(action="mute", user_id=2, request_id="mute-again"),
     )
-    assert unmute["status"] == "failed"
-    guard_bot.restrict_chat_member.assert_not_awaited()
+    assert remute["status"] == "success"
+    guard_bot.restrict_chat_member.assert_awaited_once()
+    assert (await store.record(guard_group, "restriction", "2"))["data"][
+        "event_id"
+    ] == remute["id"]
 
 
 @pytest.fixture

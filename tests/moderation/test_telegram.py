@@ -321,5 +321,10 @@ async def test_rate_limited_purge_records_each_actual_deletion(
         actor_id=1,
     )
     assert result["status"] == "partial"
-    assert result["data"] == {"deleted": [10, 12], "failed": [11]}
-    assert guard_bot.delete_message.await_count == 3
+    assert result["data"] == {
+        "deleted": [10],
+        "failed": [11],
+        "unattempted": [12],
+        "retry_after": 2,
+    }
+    assert guard_bot.delete_message.await_count == 2

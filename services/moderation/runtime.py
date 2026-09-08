@@ -247,19 +247,31 @@ async def membership(update, context):
     # Only a permission edit for a current member can invalidate our restriction.
     elif was_present and is_present and change.from_user.id != context.bot.id:
         user_id = change.new_chat_member.user.id
-        restriction = await store.record(change.chat.id, "restriction", str(user_id))
-        if (
-            restriction
-            and change.old_chat_member.to_dict() != change.new_chat_member.to_dict()
-        ):
-            await store.put_record(
-                change.chat.id,
-                "restriction",
-                str(user_id),
-                restriction["data"] | {"state": "external"},
-            )
         if change.old_chat_member.to_dict() != change.new_chat_member.to_dict():
-            async with engine.new_session() as session:
+            async with store.lock(change.chat.id), engine.new_session() as session:
+                restriction = await session.scalar(
+                    select(GuardRecord).where(
+                        GuardRecord.group_id == change.chat.id,
+                        GuardRecord.kind == "restriction",
+                        GuardRecord.key == str(user_id),
+                    )
+                )
+                if restriction:
+                    event_id = restriction.data.get("event_id")
+                    await session.delete(restriction)
+                    tasks = (
+                        await session.scalars(
+                            select(GuardTask).where(
+                                GuardTask.group_id == change.chat.id,
+                                GuardTask.kind == "unmute",
+                                GuardTask.state == "pending",
+                            )
+                        )
+                    ).all()
+                    for task in tasks:
+                        if task.data.get("event_id") == event_id:
+                            task.state = "cancelled"
+                            task.result = "其他管理员已修改成员权限，原禁言任务取消"
                 await session.execute(
                     sql_update(GroupGuardPendingVerification)
                     .where(
@@ -308,13 +320,18 @@ async def operations(update, context):
 async def migrate(old_id, new_id):
     async with store.lock(old_id), engine.new_session() as session:
         old_group = await session.get(Group, old_id)
-        if old_group and not await session.get(Group, new_id):
+        if old_group:
             data = {
                 c.name: getattr(old_group, c.name)
                 for c in Group.__table__.columns
                 if c.name != "id"
             }
-            session.add(Group(id=new_id, **data))
+            new_group = await session.get(Group, new_id)
+            if new_group:
+                for key, value in data.items():
+                    setattr(new_group, key, value)
+            else:
+                session.add(Group(id=new_id, **data))
         existing = await session.get(GroupGuardSettings, new_id)
         if existing:
             await session.delete(existing)
