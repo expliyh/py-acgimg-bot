@@ -335,7 +335,7 @@ def test_rule_names_are_safe_api_path_segments():
     assert validate_record_name("  spam  ", "规则名称") == "spam"
     with pytest.raises(ValueError, match="不能为空"):
         validate_record_name(" \t ", "规则名称")
-    with pytest.raises(ValueError, match="路径片段"):
+    with pytest.raises(ValueError, match="不能包含斜杠"):
         validate_record_name("folder/rule", "规则名称")
     with pytest.raises(ValueError, match="路径片段"):
         validate_record_name("..", "规则名称")

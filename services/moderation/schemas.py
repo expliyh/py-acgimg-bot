@@ -23,7 +23,9 @@ def validate_record_name(value: str, label: str = "名称") -> str:
         raise ValueError(f"{label}不能为空")
     if len(value) > 100:
         raise ValueError(f"{label}过长")
-    if "/" in value or value in {".", ".."}:
+    if "/" in value:
+        raise ValueError(f"{label}不能包含斜杠")
+    if value in {".", ".."}:
         raise ValueError(f"{label}必须是安全的路径片段")
     return value
 
