@@ -1,6 +1,7 @@
 """Bounded rule evaluation and short-lived rate windows."""
 
 import hashlib
+import json
 import re
 import time
 import unicodedata
@@ -12,6 +13,7 @@ import regex
 from services import group_guard
 
 from . import store
+from .schemas import ACTION_REASON_MAX_LENGTH
 
 _windows = defaultdict(deque)
 _last_sweep = 0.0
@@ -46,20 +48,19 @@ def normalize(text: str) -> str:
 
 def fingerprint(message) -> str:
     parts = [normalize(message.text or message.caption or "")]
-    if message.photo:
-        parts.append(message.photo[-1].file_unique_id)
-    for name in (
-        "video",
-        "audio",
-        "voice",
-        "document",
-        "sticker",
-        "animation",
-        "video_note",
-    ):
-        attachment = getattr(message, name, None)
-        if attachment:
-            parts.append(attachment.file_unique_id)
+    attachment = message.effective_attachment
+    if attachment:
+        items = attachment if isinstance(attachment, (list, tuple)) else [attachment]
+        for item in items[-1:]:
+            unique_id = getattr(item, "file_unique_id", None)
+            if unique_id:
+                parts.append(f"{type(item).__name__}:{unique_id}")
+                continue
+            data = item.to_dict() if hasattr(item, "to_dict") else str(item)
+            parts.append(
+                f"{type(item).__name__}:"
+                + json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+            )
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
 
@@ -168,7 +169,9 @@ async def evaluate(message, settings):
         ]
         if hits:
             return {
-                "reason": "命中规则 " + ", ".join(row["key"] for row in hits),
+                "reason": ("命中规则 " + ", ".join(row["key"] for row in hits))[
+                    :ACTION_REASON_MAX_LENGTH
+                ],
                 "warn": any(row["data"].get("action") == "delete_warn" for row in hits),
             }
     if settings.flood_enabled and message.from_user and not message.edit_date:

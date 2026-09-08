@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from weakref import WeakValueDictionary
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -22,16 +20,10 @@ LEGACY = {
     "kick_on_timeout",
     "keyword_filter_enabled",
 }
-_locks: WeakValueDictionary = WeakValueDictionary()
 
 
-def lock(group_id: int) -> asyncio.Lock:
-    key = (id(asyncio.get_running_loop()), group_id)
-    value = _locks.get(key)
-    if value is None:
-        value = asyncio.Lock()
-        _locks[key] = value
-    return value
+def lock(group_id: int):
+    return group_guard.operation_lock(group_id)
 
 
 def now() -> datetime:

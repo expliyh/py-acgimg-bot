@@ -186,7 +186,7 @@ async def guard_extra(update, context):
             elif args[1] == "remove":
                 if args[2] not in {"note", "reply", "announcement"}:
                     raise ValueError("无效内容类型")
-                await store.remove_record(chat.id, args[2], args[3])
+                await worker.delete_content(chat.id, args[2], args[3])
                 await message.reply_text("已删除")
             else:
                 extra = {}

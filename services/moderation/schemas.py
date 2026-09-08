@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 VERIFICATION_MESSAGE_MAX_LENGTH = 2000
+ACTION_REASON_MAX_LENGTH = 1000
 
 
 class StrictModel(BaseModel):
@@ -149,7 +150,7 @@ class ActionRequest(StrictModel):
     message_id: int | None = Field(None, gt=0)
     end_message_id: int | None = Field(None, gt=0)
     duration: int = Field(3600, ge=60, le=31536000)
-    reason: str = Field("管理员操作", max_length=1000)
+    reason: str = Field("管理员操作", max_length=ACTION_REASON_MAX_LENGTH)
     event_id: str | None = None
     request_id: str = Field(min_length=1, max_length=100)
 
@@ -184,6 +185,14 @@ class Content(StrictModel):
     due_at: datetime | None = None
     repeat: Literal["once", "daily", "weekly"] = "once"
     timezone: str = "Asia/Shanghai"
+
+    @field_validator("name")
+    @classmethod
+    def normalized_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("内容名称不能为空")
+        return value
 
     @model_validator(mode="after")
     def schedule(self):

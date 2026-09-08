@@ -1,7 +1,7 @@
 """Regression cases for automated review findings on PR #124."""
 
 import asyncio
-from datetime import timedelta
+from datetime import timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -24,7 +24,13 @@ from services.moderation import (
     verification,
     worker,
 )
-from services.moderation.schemas import AIConfig, AIVerdict
+from services.moderation.schemas import (
+    ActionRequest,
+    AIConfig,
+    AIVerdict,
+    Content,
+    Policy,
+)
 
 
 def member_update(message, bot, *, actor=2, old=None, new=None):
@@ -113,6 +119,124 @@ async def test_later_external_permission_change_still_stops_verification(
         == "验证已失效或已处理"
     )
     guard_bot.restrict_chat_member.assert_awaited_once()
+
+
+async def test_policy_save_serializes_with_legacy_setting_writes(
+    guard_group, monkeypatch
+):
+    policy_read = asyncio.Event()
+    release_save = asyncio.Event()
+    original_policy = store.policy
+
+    async def delayed_policy(group_id):
+        value = await original_policy(group_id)
+        policy_read.set()
+        await release_save.wait()
+        return value
+
+    monkeypatch.setattr(store, "policy", delayed_policy)
+    policy_save = asyncio.create_task(store.save_policy(guard_group, {"ai_spam": True}))
+    await policy_read.wait()
+    legacy_save = asyncio.create_task(
+        group_guard.set_verification_enabled(guard_group, True)
+    )
+    await asyncio.sleep(0)
+    assert not legacy_save.done()
+    release_save.set()
+    await asyncio.gather(policy_save, legacy_save)
+
+    saved = await original_policy(guard_group)
+    assert saved.ai_spam is True
+    assert saved.verification_enabled is True
+
+
+async def test_telegram_content_removal_cancels_announcement_task(
+    guard_group, guard_bot, guard_message
+):
+    await worker.save_content(
+        guard_group,
+        Content(
+            kind="announcement",
+            name="future",
+            text="hello",
+            due_at=store.now().replace(tzinfo=timezone.utc) + timedelta(days=30),
+        ),
+    )
+    update = Update(201, message=guard_message(text="/guard content remove"))
+    assert await commands.guard_extra(
+        update,
+        SimpleNamespace(
+            bot=guard_bot,
+            args=["content", "remove", "announcement", "future"],
+        ),
+    )
+
+    assert await store.record(guard_group, "announcement", "future") is None
+    async with engine.new_session() as session:
+        task = await session.scalar(
+            select(GuardTask).where(GuardTask.kind == "announcement")
+        )
+        assert task.state == "cancelled"
+
+
+def test_content_names_are_trimmed_and_must_not_be_blank():
+    assert Content(kind="reply", name="  trigger  ", text="hello").name == "trigger"
+    with pytest.raises(ValueError, match="内容名称不能为空"):
+        Content(kind="reply", name=" \t ", text="hello")
+
+
+async def test_distinct_attachment_only_polls_do_not_count_as_repeats(
+    guard_group, guard_message
+):
+    settings = Policy(flood_enabled=True, flood_limit=100, repeat_limit=3)
+
+    def poll(poll_id, message_id):
+        return guard_message(
+            message_id=message_id,
+            text=None,
+            poll={
+                "id": poll_id,
+                "question": "Choose",
+                "options": [
+                    {"text": "A", "voter_count": 0, "persistent_id": "a"},
+                    {"text": "B", "voter_count": 0, "persistent_id": "b"},
+                ],
+                "total_voter_count": 0,
+                "is_closed": False,
+                "is_anonymous": True,
+                "type": "regular",
+                "allows_multiple_answers": False,
+                "allows_revoting": False,
+                "members_only": False,
+            },
+        )
+
+    messages = [poll(f"poll-{index}", 20 + index) for index in range(3)]
+    assert len({rules.fingerprint(value) for value in messages}) == 3
+    for value in messages:
+        assert await rules.evaluate(value, settings) is None
+
+
+async def test_combined_rule_reason_fits_action_request(guard_group, guard_message):
+    for index in range(11):
+        name = f"{index:02d}-" + "x" * 97
+        await store.put_record(
+            guard_group,
+            "rule",
+            name,
+            {"kind": "keyword", "pattern": "spam", "action": "delete_warn"},
+        )
+    result = await rules.evaluate(
+        guard_message(text="spam"), Policy(rules_enabled=True)
+    )
+
+    assert len(result["reason"]) == 1000
+    ActionRequest(
+        action="delete",
+        message_id=10,
+        request_id="bounded-rule-reason",
+        reason=result["reason"],
+    )
 
 
 PHOTO = [
