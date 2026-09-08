@@ -1,12 +1,15 @@
 import json
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy import update as sql_update
 from telegram.error import TelegramError
 from telegram.ext import ApplicationHandlerStop
 
 from models import (
+    ActiveMessageHandler,
+    CommandHistory,
     Group,
+    GroupChatHistory,
     GroupGuardKeywordRule,
     GroupGuardPendingVerification,
     GroupGuardSettings,
@@ -166,15 +169,22 @@ async def member_joined(bot, chat, user, date):
         timestamp = date.timestamp()
         if old and abs(old["data"]["timestamp"] - timestamp) < 10:
             return
-        await store.put_record(
-            chat.id, "join_seen", str(user.id), {"timestamp": timestamp}
-        )
-    try:
-        await verification.joined(bot, chat, user)
-    except (ValueError, TelegramError) as exc:
-        await store.event(
-            chat.id, "join", status="failed", user_id=user.id, reason=type(exc).__name__
-        )
+        try:
+            handled = await verification.joined(bot, chat, user, lock_held=True)
+        except (ValueError, TelegramError) as exc:
+            status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
+            await store.event(
+                chat.id,
+                "join",
+                status=status,
+                user_id=user.id,
+                reason=type(exc).__name__,
+            )
+            return
+        if handled:
+            await store.put_record(
+                chat.id, "join_seen", str(user.id), {"timestamp": timestamp}
+            )
 
 
 async def member_left(group_id, user_id, date):
@@ -364,28 +374,66 @@ async def migrate(old_id, new_id):
                 await session.delete(existing)
                 await session.flush()
         # Telegram may deliver updates for the upgraded group before its migration
-        # service message. Keep those newer target rows when a natural key collides.
-        for model, key in (
-            (GroupGuardPendingVerification, lambda row: row.user_id),
-            (GuardRecord, lambda row: (row.kind, row.key)),
-            (
-                GuardEvent,
-                lambda row: (row.incident, row.action) if row.incident else None,
-            ),
-        ):
-            source_rows = (
-                await session.scalars(select(model).where(model.group_id == old_id))
-            ).all()
-            target_keys = {
-                value
-                for row in (
-                    await session.scalars(select(model).where(model.group_id == new_id))
+        # service message. Keep target rows when a natural key collides. Read keys
+        # in bounded batches so a large message history does not fill memory.
+        async def discard_collisions(model, columns, *, require_non_null=()):
+            cursor = None
+            while True:
+                stmt = select(*columns).where(model.group_id == old_id)
+                for column in require_non_null:
+                    stmt = stmt.where(column.is_not(None))
+                if cursor is not None:
+                    stmt = stmt.where(
+                        columns[0] > cursor[0]
+                        if len(columns) == 1
+                        else tuple_(*columns) > cursor
+                    )
+                source_keys = (
+                    await session.execute(stmt.order_by(*columns).limit(500))
                 ).all()
-                if (value := key(row)) is not None
-            }
-            for row in source_rows:
-                if key(row) in target_keys:
-                    await session.delete(row)
+                if not source_keys:
+                    break
+                values = [tuple(row) for row in source_keys]
+                target_stmt = select(*columns).where(model.group_id == new_id)
+                if len(columns) == 1:
+                    target_stmt = target_stmt.where(
+                        columns[0].in_([value[0] for value in values])
+                    )
+                else:
+                    target_stmt = target_stmt.where(tuple_(*columns).in_(values))
+                collisions = [
+                    tuple(row)
+                    for row in (await session.execute(target_stmt)).all()
+                ]
+                if collisions:
+                    predicate = (
+                        columns[0].in_([value[0] for value in collisions])
+                        if len(columns) == 1
+                        else tuple_(*columns).in_(collisions)
+                    )
+                    await session.execute(
+                        delete(model).where(model.group_id == old_id, predicate)
+                    )
+                cursor = values[-1]
+
+        await discard_collisions(
+            GroupGuardPendingVerification,
+            (GroupGuardPendingVerification.user_id,),
+        )
+        await discard_collisions(GuardRecord, (GuardRecord.kind, GuardRecord.key))
+        await discard_collisions(
+            GuardEvent,
+            (GuardEvent.incident, GuardEvent.action),
+            require_non_null=(GuardEvent.incident,),
+        )
+        await discard_collisions(
+            GroupChatHistory,
+            (GroupChatHistory.message_id, GroupChatHistory.user_id),
+        )
+        await discard_collisions(
+            ActiveMessageHandler,
+            (ActiveMessageHandler.user_id,),
+        )
         await session.flush()
         for model in (
             GroupGuardSettings,
@@ -394,12 +442,19 @@ async def migrate(old_id, new_id):
             GuardRecord,
             GuardEvent,
             GuardTask,
+            GroupChatHistory,
+            ActiveMessageHandler,
         ):
             await session.execute(
                 sql_update(model)
                 .where(model.group_id == old_id)
                 .values(group_id=new_id)
             )
+        await session.execute(
+            sql_update(CommandHistory)
+            .where(CommandHistory.chat_id == old_id)
+            .values(chat_id=new_id)
+        )
         if migration_marker is None:
             session.add(
                 GuardRecord(
@@ -411,6 +466,8 @@ async def migrate(old_id, new_id):
                     created_at=store.now(),
                 )
             )
+        if old_group:
+            await session.delete(old_group)
         await session.commit()
     from services import group_guard
 

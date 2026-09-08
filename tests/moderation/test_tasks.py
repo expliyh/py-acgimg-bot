@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select, update
@@ -12,7 +13,7 @@ from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent, GuardTask
 from registries import engine
 from services.moderation import actions, ai, store, verification, worker
-from services.moderation.schemas import ActionRequest, Content, Policy
+from services.moderation.schemas import ActionRequest, AIVerdict, Content, Policy
 
 
 def utc_naive(year, month, day, hour):
@@ -304,7 +305,103 @@ async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
         await running.stop()
     assert cancelled == active
     await worker.Worker(guard_bot).recover()
-    assert sum(row["state"] == "uncertain" for row in await jobs()) == 2
+    assert sum(row["state"] == "pending" for row in await jobs()) == 4
+
+
+async def test_recovery_retries_ai_classification_before_external_actions(
+    guard_group, guard_bot, guard_ai_job, monkeypatch
+):
+    job = await guard_ai_job()
+    task_id = await store.task(guard_group, "ai", store.now(), job["data"])
+    await worker.set_state(task_id, "running", "classifying")
+    await store.event(
+        guard_group,
+        "ai",
+        incident=f"ai:10:{job['data']['version']}",
+        status="running",
+        message_id=10,
+    )
+
+    restarted = worker.Worker(guard_bot)
+    await restarted.recover()
+    async with engine.new_session() as session:
+        recovered = await session.get(GuardTask, task_id)
+        assert recovered.state == "pending"
+        retry = store.dump(recovered)
+        assert await session.scalar(
+            select(GuardEvent).where(GuardEvent.action == "ai")
+        ) is None
+
+    classifier = AsyncMock(
+        return_value=(
+            AIVerdict(category="safe", confidence=1, reason="safe"),
+            {"total_tokens": 2},
+        )
+    )
+    monkeypatch.setattr(ai, "classify", classifier)
+    await worker.set_state(task_id, "running", "classifying")
+    await restarted.dispatch(retry)
+
+    classifier.assert_awaited_once()
+    async with engine.new_session() as session:
+        assert (await session.get(GuardTask, task_id)).state == "done"
+        event = await session.scalar(
+            select(GuardEvent).where(GuardEvent.action == "ai")
+        )
+        assert event.status == "success"
+
+
+async def test_recovery_preserves_ai_ambiguity_after_moderation_begins(
+    guard_group, guard_bot, guard_ai_job
+):
+    job = await guard_ai_job()
+    task_id = await store.task(guard_group, "ai", store.now(), job["data"])
+    await worker.set_state(task_id, "running", "moderating")
+    await store.event(
+        guard_group,
+        "ai",
+        incident=f"ai:10:{job['data']['version']}",
+        status="running",
+        message_id=10,
+    )
+
+    await worker.Worker(guard_bot).recover()
+    async with engine.new_session() as session:
+        assert (await session.get(GuardTask, task_id)).state == "uncertain"
+        event = await session.scalar(
+            select(GuardEvent).where(GuardEvent.action == "ai")
+        )
+        assert event.status == "uncertain"
+
+
+async def test_ai_persists_moderation_phase_before_punishment(
+    guard_group, guard_bot, guard_ai_job, monkeypatch
+):
+    job = await guard_ai_job()
+    task_id = await store.task(guard_group, "ai", store.now(), job["data"])
+    await worker.set_state(task_id, "running", "classifying")
+    job["id"] = task_id
+    monkeypatch.setattr(
+        ai,
+        "classify",
+        AsyncMock(
+            return_value=(
+                AIVerdict(category="spam", confidence=1, reason="spam"),
+                {},
+            )
+        ),
+    )
+    observed = None
+
+    async def punish(*args, **kwargs):
+        nonlocal observed
+        async with engine.new_session() as session:
+            observed = (await session.get(GuardTask, task_id)).result
+        return []
+
+    monkeypatch.setattr(ai.actions, "punish", punish)
+    assert await ai.process(guard_bot, job) == "punish"
+    assert observed == "moderating"
 
 
 async def test_retention_preserves_effective_warnings_and_uncertain_tasks(

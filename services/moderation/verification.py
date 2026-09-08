@@ -1,4 +1,5 @@
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
@@ -20,10 +21,21 @@ def greeting(template, user, chat, timeout=60):
     )
 
 
-async def start(bot, group_id, member, title, settings, *, force=False):
+@asynccontextmanager
+async def _verification_lock(group_id, lock_held):
+    if lock_held:
+        yield
+    else:
+        async with store.lock(group_id):
+            yield
+
+
+async def start(
+    bot, group_id, member, title, settings, *, force=False, lock_held=False
+):
     if member.is_bot or await actions.is_admin(bot, group_id, member.id):
-        return
-    async with store.lock(group_id):
+        return True
+    async with _verification_lock(group_id, lock_held):
         async with engine.new_session() as session:
             previous = await session.get(Pending, (group_id, member.id))
             if previous and previous.state in {
@@ -33,7 +45,7 @@ async def start(bot, group_id, member, title, settings, *, force=False):
                 "restricted",
                 "uncertain",
             }:
-                return
+                return True
         await actions.require_right(bot, group_id, "can_restrict_members")
         snapshot = actions.permissions_snapshot(
             await bot.get_chat_member(group_id, member.id)
@@ -111,7 +123,9 @@ async def start(bot, group_id, member, title, settings, *, force=False):
             await store.event(
                 group_id, "verification", status=state, user_id=member.id, reason=result
             )
-            return
+            # A successfully restored member can safely retry setup on a duplicate
+            # Telegram join update. An uncertain restoration must not be repeated.
+            return state == "uncertain"
         async with engine.new_session() as session:
             await session.execute(
                 update(Pending)
@@ -119,6 +133,7 @@ async def start(bot, group_id, member, title, settings, *, force=False):
                 .values(message_id=sent.message_id, state="pending")
             )
             await session.commit()
+        return True
 
 
 async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
@@ -258,10 +273,10 @@ async def callback(update, context, parts):
     )
 
 
-async def joined(bot, chat, member):
+async def joined(bot, chat, member, *, lock_held=False):
     settings = await store.policy(chat.id)
     if member.is_bot:
-        return
+        return True
     raid = False
     if settings.raid_enabled:
         count = rules.window((chat.id, "joins"), settings.raid_window)
@@ -279,8 +294,14 @@ async def joined(bot, chat, member):
         state = await store.record(chat.id, "raid", "active")
         raid = bool(state and state["data"]["until"] > store.now().isoformat())
     if settings.verification_enabled or raid:
-        await start(
-            bot, chat.id, member, chat.title or str(chat.id), settings, force=raid
+        return await start(
+            bot,
+            chat.id,
+            member,
+            chat.title or str(chat.id),
+            settings,
+            force=raid,
+            lock_held=lock_held,
         )
     elif settings.welcome_enabled:
         await bot.send_message(
@@ -289,6 +310,7 @@ async def joined(bot, chat, member):
                 settings.welcome_text, member.full_name, chat.title or str(chat.id)
             ),
         )
+    return True
 
 
 async def join_request(update, context):

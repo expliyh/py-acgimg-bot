@@ -20,7 +20,14 @@ from telegram import (
 from telegram.error import BadRequest, TimedOut
 from telegram.ext import ApplicationHandlerStop
 
-from models import Group, GuardTask
+from defines import MessageType
+from models import (
+    ActiveMessageHandler,
+    CommandHistory,
+    Group,
+    GroupChatHistory,
+    GuardTask,
+)
 from models import GroupGuardPendingVerification as Pending
 from registries import engine
 from services import group_guard, schema_migrator
@@ -366,6 +373,14 @@ async def test_timeout_no_kick_accurate_result_and_manual_unmute(tg):
     assert "保持限制" in result
     tg.ban_chat_member.assert_not_awaited()
     assert (await actions.execute(tg, GROUP, request("unmute")))["status"] == "success"
+    async with engine.new_session() as session:
+        assert (await session.get(Pending, (GROUP, 2))).state == "cancelled"
+    restore_calls = tg.restrict_chat_member.await_count
+    repeated = await actions.execute(
+        tg, GROUP, request("unmute", key="second-unmute")
+    )
+    assert repeated["status"] == "failed"
+    assert tg.restrict_chat_member.await_count == restore_calls
 
 
 async def test_recovery_does_not_repeat_uncertain_sends(tg):
@@ -494,10 +509,39 @@ async def test_migrate_group_state():
     await store.save_policy(GROUP, {"flood_enabled": True})
     await store.put_record(GROUP, "exempt", "2", {})
     await store.task(GROUP, "delete", store.now(), {"message_id": 5})
+    async with engine.new_session() as session:
+        session.add_all(
+            [
+                GroupChatHistory(
+                    message_id=7,
+                    group_id=GROUP,
+                    user_id=2,
+                    type=MessageType.TEXT,
+                    bot_send=False,
+                    text="history",
+                    sent_at=store.now(),
+                ),
+                CommandHistory(
+                    command="rules", user_id=2, chat_id=GROUP, success=True
+                ),
+                ActiveMessageHandler(
+                    group_id=GROUP, user_id=2, handler_id="handler"
+                ),
+            ]
+        )
+        await session.commit()
     await runtime.migrate(GROUP, GROUP - 1)
     assert (await store.policy(GROUP - 1)).flood_enabled
     assert not (await store.policy(GROUP)).flood_enabled
     assert await store.record(GROUP - 1, "exempt", "2")
+    async with engine.new_session() as session:
+        assert await session.get(Group, GROUP) is None
+        assert await session.get(Group, GROUP - 1)
+        assert await session.get(GroupChatHistory, (7, GROUP - 1, 2))
+        assert await session.get(GroupChatHistory, (7, GROUP, 2)) is None
+        assert await session.get(ActiveMessageHandler, (GROUP - 1, 2))
+        command = await session.scalar(select(CommandHistory))
+        assert command.chat_id == GROUP - 1
     await runtime.migrate(GROUP, GROUP - 1)
     assert (await store.policy(GROUP - 1)).flood_enabled
     assert await store.record(GROUP - 1, "exempt", "2")
@@ -540,6 +584,30 @@ async def test_migrate_keeps_new_target_rows_on_natural_key_collision():
                     expires_at=store.now() + timedelta(minutes=1),
                     state="pending",
                 ),
+                GroupChatHistory(
+                    message_id=8,
+                    group_id=GROUP,
+                    user_id=2,
+                    type=MessageType.TEXT,
+                    bot_send=False,
+                    text="old history",
+                    sent_at=store.now(),
+                ),
+                GroupChatHistory(
+                    message_id=8,
+                    group_id=new_id,
+                    user_id=2,
+                    type=MessageType.TEXT,
+                    bot_send=False,
+                    text="new history",
+                    sent_at=store.now(),
+                ),
+                ActiveMessageHandler(
+                    group_id=GROUP, user_id=3, handler_id="old handler"
+                ),
+                ActiveMessageHandler(
+                    group_id=new_id, user_id=3, handler_id="new handler"
+                ),
             ]
         )
         await session.commit()
@@ -551,6 +619,12 @@ async def test_migrate_keeps_new_target_rows_on_natural_key_collision():
     async with engine.new_session() as session:
         assert (await session.get(Pending, (new_id, 2))).token == "new-token"
         assert await session.get(Pending, (GROUP, 2)) is None
+        history = await session.get(GroupChatHistory, (8, new_id, 2))
+        assert history.text == "new history"
+        assert await session.get(GroupChatHistory, (8, GROUP, 2)) is None
+        handler = await session.get(ActiveMessageHandler, (new_id, 3))
+        assert handler.handler_id == "new handler"
+        assert await session.get(ActiveMessageHandler, (GROUP, 3)) is None
 
 
 async def test_bad_request_mute_is_failed_and_does_not_block_retry(tg):

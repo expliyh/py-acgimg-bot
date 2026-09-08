@@ -276,6 +276,10 @@ async def process(bot, job):
             ]
         results = []
         if decision == "punish":
+            if job.get("id"):
+                # Recovery may safely repeat classification, but once punishment
+                # begins Telegram could have acted without returning a response.
+                await store.mark_task_phase(job["id"], "moderating")
             results = await actions.punish(
                 bot,
                 group_id,

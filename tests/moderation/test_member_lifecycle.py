@@ -1,11 +1,13 @@
 """Departures must retire old member state; restarts must reuse durable timers."""
 
+import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
 from telegram import ChatMemberRestricted, Update
+from telegram.error import NetworkError
 
 from models import GroupGuardPendingVerification as Pending
 from models import GuardTask
@@ -42,6 +44,55 @@ def membership(message, bot, old, new, *, actor=2, date=None):
         },
         bot,
     )
+
+
+async def test_failed_join_setup_remains_retryable_on_duplicate_update(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"verification_enabled": True})
+    message = guard_message()
+    get_member = guard_bot.get_chat_member.side_effect
+    first_lookup = True
+
+    async def flaky_get_member(chat_id, user_id):
+        nonlocal first_lookup
+        if first_lookup:
+            first_lookup = False
+            raise NetworkError("temporary lookup failure")
+        return await get_member(chat_id, user_id)
+
+    guard_bot.get_chat_member.side_effect = flaky_get_member
+    await runtime.member_joined(
+        guard_bot, message.chat, message.from_user, message.date
+    )
+    assert await store.record(guard_group, "join_seen", "2") is None
+    async with engine.new_session() as session:
+        assert await session.get(Pending, (guard_group, 2)) is None
+
+    await runtime.member_joined(
+        guard_bot, message.chat, message.from_user, message.date
+    )
+    assert await store.record(guard_group, "join_seen", "2")
+    async with engine.new_session() as session:
+        assert (await session.get(Pending, (guard_group, 2))).state == "pending"
+    guard_bot.restrict_chat_member.assert_awaited_once()
+
+
+async def test_concurrent_duplicate_joins_start_one_verification(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"verification_enabled": True})
+    message = guard_message()
+    await asyncio.gather(
+        runtime.member_joined(
+            guard_bot, message.chat, message.from_user, message.date
+        ),
+        runtime.member_joined(
+            guard_bot, message.chat, message.from_user, message.date
+        ),
+    )
+    guard_bot.restrict_chat_member.assert_awaited_once()
+    guard_bot.send_message.assert_awaited_once()
 
 
 async def timers(group_id):

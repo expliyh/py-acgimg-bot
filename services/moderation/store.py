@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
@@ -111,7 +111,13 @@ async def record(group_id: int, kind: str, key: str) -> dict | None:
 
 
 async def put_record(
-    group_id: int, kind: str, key: str, data: dict, enabled=True
+    group_id: int,
+    kind: str,
+    key: str,
+    data: dict,
+    enabled=True,
+    *,
+    touch=False,
 ) -> dict:
     observed_at = now()
     async with engine.new_session() as session:
@@ -131,7 +137,7 @@ async def put_record(
                 created_at=observed_at,
             )
             session.add(row)
-        elif kind in TEMPORARY_RECORD_KINDS:
+        elif kind in TEMPORARY_RECORD_KINDS or touch:
             row.created_at = observed_at
         row.data, row.enabled = json_data(data), enabled
         result = dump(row)
@@ -148,7 +154,7 @@ async def put_record(
             )
             if row is None:
                 raise
-            if kind in TEMPORARY_RECORD_KINDS:
+            if kind in TEMPORARY_RECORD_KINDS or touch:
                 row.created_at = observed_at
             row.data, row.enabled = json_data(data), enabled
             result = dump(row)
@@ -263,6 +269,17 @@ async def task(group_id: int, kind: str, due_at: datetime, data: dict) -> str:
         )
         await session.commit()
     return task_id
+
+
+async def mark_task_phase(task_id: str, phase: str) -> None:
+    """Persist a running task's phase before it may call an external API."""
+    async with engine.new_session() as session:
+        await session.execute(
+            update(GuardTask)
+            .where(GuardTask.id == task_id, GuardTask.state == "running")
+            .values(result=phase[:2000])
+        )
+        await session.commit()
 
 
 async def ai_config() -> AIConfig:

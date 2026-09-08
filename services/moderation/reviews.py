@@ -133,6 +133,7 @@ async def decide(
         results = [
             {"error": str(exc) if isinstance(exc, ValueError) else type(exc).__name__}
         ]
+    terminal = status in {"resolved", "failed"}
     return await store.put_record(
         group_id,
         "review",
@@ -145,4 +146,6 @@ async def decide(
             "reason": reason,
             "results": results,
         },
+        enabled=not terminal,
+        touch=terminal,
     )

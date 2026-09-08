@@ -12,9 +12,9 @@ from telegram.error import BadRequest
 
 from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
-from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
+from models import Group, GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
-from services import group_guard
+from services import group_guard, message_logging
 from services.moderation import (
     actions,
     ai,
@@ -360,9 +360,13 @@ async def test_migrate_from_service_message_moves_guard_state(
     )
 
     await runtime.preprocess(update, SimpleNamespace(bot=guard_bot))
+    await message_logging.log_message_update(update, SimpleNamespace(bot=guard_bot))
 
     assert (await store.policy(new_id)).flood_enabled
     assert not (await store.policy(guard_group)).flood_enabled
+    async with engine.new_session() as session:
+        assert await session.get(Group, guard_group) is None
+        assert await session.get(Group, new_id)
 
 
 PHOTO = [
@@ -533,6 +537,61 @@ async def test_cleanup_discovers_task_only_groups(guard_group, guard_bot):
     async with engine.new_session() as session:
         assert await session.get(GuardTask, ended) is None
         assert (await session.get(GuardTask, uncertain)).state == "uncertain"
+
+
+async def test_cleanup_expires_only_terminal_reviews(guard_group, guard_bot):
+    await store.save_policy(guard_group, {"log_days": 7})
+    rows = [
+        await store.put_record(
+            guard_group,
+            "review",
+            state,
+            {"state": state},
+            enabled=state not in {"resolved", "failed"},
+        )
+        for state in ("pending", "uncertain", "resolved", "failed")
+    ]
+    # Simulate a terminal row written by a version that did not set enabled=False.
+    async with engine.new_session() as session:
+        await session.execute(
+            update(GuardRecord)
+            .where(GuardRecord.id.in_([row["id"] for row in rows]))
+            .values(created_at=store.now() - timedelta(days=8))
+        )
+        legacy_failed = await session.get(GuardRecord, rows[-1]["id"])
+        legacy_failed.enabled = True
+        await session.commit()
+
+    await worker.Worker(guard_bot).cleanup()
+
+    remaining = await store.records(guard_group, "review")
+    assert {row["data"]["state"] for row in remaining} == {"pending", "uncertain"}
+
+
+async def test_review_retention_starts_at_terminal_transition(guard_group, guard_bot):
+    await store.save_policy(guard_group, {"log_days": 7})
+    row = await reviews.create(
+        guard_group,
+        "report:10",
+        {"kind": "message", "user_id": 2, "message_id": 10},
+    )
+    async with engine.new_session() as session:
+        await session.execute(
+            update(GuardRecord)
+            .where(GuardRecord.id == row["id"])
+            .values(created_at=store.now() - timedelta(days=8))
+        )
+        await session.commit()
+
+    resolved = await reviews.decide(
+        guard_bot, guard_group, row["id"], "dismiss", "checked", actor_id=1
+    )
+    assert resolved["data"]["state"] == "resolved"
+    assert resolved["enabled"] is False
+    assert resolved["created_at"] > store.now() - timedelta(minutes=1)
+
+    await worker.Worker(guard_bot).cleanup()
+    assert await store.record(guard_group, "review", "report:10")
 
 
 @pytest.mark.parametrize("tracked", [False, True])

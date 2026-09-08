@@ -130,6 +130,32 @@ class Worker:
 
     async def recover(self):
         async with engine.new_session() as session:
+            interrupted_ai = (
+                await session.scalars(
+                    select(GuardTask).where(
+                        GuardTask.kind == "ai", GuardTask.state == "running"
+                    )
+                )
+            ).all()
+            retryable_ai = [
+                task for task in interrupted_ai if task.result != "moderating"
+            ]
+            for task in retryable_ai:
+                message = task.data.get("message") or {}
+                message_id = message.get("message_id")
+                version = task.data.get("version")
+                if message_id is not None and version:
+                    await session.execute(
+                        delete(GuardEvent).where(
+                            GuardEvent.group_id == task.group_id,
+                            GuardEvent.action == "ai",
+                            GuardEvent.incident == f"ai:{message_id}:{version}",
+                            GuardEvent.status == "running",
+                        )
+                    )
+                task.state = "pending"
+                task.result = "分类阶段被中断，已重新排队"
+                task.completed_at = None
             interrupted_announcements = [
                 store.dump(row)
                 for row in (
@@ -344,7 +370,11 @@ class Worker:
                 result = await session.execute(
                     update(GuardTask)
                     .where(GuardTask.id == job["id"], GuardTask.state == "pending")
-                    .values(state="running", completed_at=None)
+                    .values(
+                        state="running",
+                        result="classifying" if job["kind"] == "ai" else None,
+                        completed_at=None,
+                    )
                 )
                 await session.commit()
                 if not result.rowcount:
@@ -452,16 +482,34 @@ class Worker:
             )
             groups = (
                 await session.scalars(
-                    select(GuardEvent.group_id).union(select(GuardTask.group_id))
+                    select(GuardEvent.group_id).union(
+                        select(GuardTask.group_id),
+                        select(GuardRecord.group_id).where(
+                            GuardRecord.kind == "review"
+                        ),
+                    )
                 )
             ).all()
             await session.commit()
         for group_id in groups:
             settings = await store.policy(group_id)
+            review_cutoff = store.now() - timedelta(days=settings.log_days)
             cutoff = store.now() - timedelta(
                 days=max(settings.log_days, settings.warning_days)
             )
             async with engine.new_session() as session:
+                expired_reviews = (
+                    await session.scalars(
+                        select(GuardRecord).where(
+                            GuardRecord.group_id == group_id,
+                            GuardRecord.kind == "review",
+                            GuardRecord.created_at < review_cutoff,
+                        )
+                    )
+                ).all()
+                for review in expired_reviews:
+                    if review.data.get("state") in {"resolved", "failed"}:
+                        await session.delete(review)
                 await session.execute(
                     delete(GuardEvent).where(
                         GuardEvent.group_id == group_id, GuardEvent.created_at < cutoff

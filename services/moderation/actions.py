@@ -2,12 +2,12 @@
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from telegram import ChatPermissions
 from telegram.error import NetworkError, RetryAfter, TelegramError, TimedOut
 
 from models import GroupGuardPendingVerification as Pending
-from models import GuardEvent
+from models import GuardEvent, GuardRecord
 from registries import engine
 
 from . import store
@@ -257,7 +257,35 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
                     await restore_permissions(
                         bot, group_id, req.user_id, restriction["data"]["original"]
                     )
-                await store.remove_record(group_id, "restriction", str(req.user_id))
+                verification_token = restriction["data"].get("event_id")
+                async with engine.new_session() as session:
+                    cancelled = await session.execute(
+                        update(Pending)
+                        .where(
+                            Pending.group_id == group_id,
+                            Pending.user_id == req.user_id,
+                            Pending.token == verification_token,
+                            Pending.state.in_(
+                                [
+                                    "pending",
+                                    "preparing",
+                                    "processing",
+                                    "restricted",
+                                    "uncertain",
+                                ]
+                            ),
+                        )
+                        .values(state="cancelled", result="管理员解除验证限制")
+                    )
+                    await session.execute(
+                        delete(GuardRecord).where(
+                            GuardRecord.id == restriction["id"],
+                            GuardRecord.group_id == group_id,
+                        )
+                    )
+                    await session.commit()
+                if cancelled.rowcount:
+                    data["verification"] = "cancelled"
             elif req.action == "kick":
                 ban_until = datetime.now(timezone.utc) + timedelta(minutes=1)
                 await bot.ban_chat_member(group_id, req.user_id, until_date=ban_until)
