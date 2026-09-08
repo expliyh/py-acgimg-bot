@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select, update
+from telegram.error import RetryAfter
 
 from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent, GuardRecord, GuardTask
@@ -254,7 +255,11 @@ class Worker:
                 existing = pending_tasks.get(key, [])
                 if existing:
                     # Keep the original task and reconcile its authoritative deadline.
-                    existing[0].due_at = due_at
+                    existing[0].due_at = (
+                        max(due_at, existing[0].due_at)
+                        if existing[0].data.get("retry_attempt")
+                        else due_at
+                    )
                     for duplicate in existing[1:]:
                         duplicate.state = "cancelled"
                         duplicate.result = "恢复时合并重复的到期任务"
@@ -411,18 +416,26 @@ class Worker:
                     group_id, "restriction", str(data["user_id"])
                 )
                 if record and record["data"]["event_id"] == data["event_id"]:
+                    # Recovery can rebuild a task, so retain the restriction's
+                    # receipt key. Only a confirmed rate limit permits a new attempt.
+                    request_id = f"expire:{data['event_id']}"
+                    if data.get("retry_attempt"):
+                        request_id += f":retry:{data['retry_attempt']}"
                     result = await actions.execute(
                         self.bot,
                         group_id,
                         ActionRequest(
                             action="unmute",
                             user_id=data["user_id"],
-                            request_id=f"expire:{data['event_id']}",
+                            request_id=request_id,
                         ),
                         source="scheduler",
                         expected_restriction_id=data["event_id"],
                     )
                     if result["status"] != "success":
+                        if result["status"] == "failed" and "retry_after" in result["data"]:
+                            await self.retry_unmute(job, result["data"]["retry_after"])
+                            return
                         await set_state(
                             job["id"], result["status"], str(result["data"])
                         )
@@ -435,6 +448,9 @@ class Worker:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if kind == "unmute" and isinstance(exc, RetryAfter):
+                await self.retry_unmute(job, exc.retry_after)
+                return
             logger.exception("Moderation task %s failed", job["id"])
             task_status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
             await set_state(
@@ -449,6 +465,25 @@ class Worker:
                 reason=type(exc).__name__,
                 data={"task_id": job["id"], "kind": kind},
             )
+
+    async def retry_unmute(self, job, delay):
+        if isinstance(delay, timedelta):
+            delay = delay.total_seconds()
+        async with engine.new_session() as session:
+            await session.execute(
+                update(GuardTask)
+                .where(GuardTask.id == job["id"])
+                .values(
+                    state="pending",
+                    due_at=store.now() + timedelta(seconds=max(1, delay)),
+                    data=job["data"] | {
+                        "retry_attempt": job["data"].get("retry_attempt", 0) + 1
+                    },
+                    result="Telegram 限流，等待后重试解禁",
+                    completed_at=None,
+                )
+            )
+            await session.commit()
 
     async def announce(self, job):
         group_id, data = job["group_id"], job["data"]

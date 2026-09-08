@@ -404,9 +404,71 @@ async def test_image_document_uses_caption_and_known_permitted_grade(
     )
     monkeypatch.setattr(ai, "classify", classifier)
     assert await ai.process(guard_bot, job) == "allow"
-    downloader.assert_awaited_once()
-    assert classifier.call_args.args[2:4] == ("normal art", image)
+    downloader.assert_not_awaited()
+    classifier.assert_not_awaited()
     guard_bot.delete_message.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "grade,limit,allow_gore,expected",
+    [
+        ({"sanity_level": 6, "r18g": False}, 5, False, "punish"),
+        ({"sanity_level": 6, "r18g": False}, 6, False, "allow"),
+        ({"sanity_level": 5, "r18g": True}, 6, False, "punish"),
+        ({"sanity_level": 5, "r18g": True}, 6, True, "allow"),
+        ({"sanity_level": None, "r18g": False}, 5, False, "review"),
+    ],
+)
+async def test_known_grade_does_not_require_download_or_models(
+    guard_group, guard_bot, guard_ai_job, monkeypatch,
+    grade, limit, allow_gore, expected,
+):
+    job = await guard_ai_job(
+        policy={"ai_spam": False, "ai_images": True},
+        text=None,
+        document={"file_id": "known", "file_unique_id": "known", "mime_type": "image/png"},
+    )
+    await store.save_ai_config(AIConfig(base_url="http://127.0.0.1:9/v1"))
+    async with engine.new_session() as session:
+        group = await session.get(Group, guard_group)
+        group.sanity_limit, group.allow_r18g = limit, allow_gore
+        await session.commit()
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=grade))
+    downloader = AsyncMock(side_effect=TimeoutError())
+    classifier = AsyncMock(side_effect=TimeoutError())
+    monkeypatch.setattr(ai, "image_data", downloader)
+    monkeypatch.setattr(ai, "classify", classifier)
+    assert await ai.process(guard_bot, job) == expected
+    downloader.assert_not_awaited()
+    classifier.assert_not_awaited()
+    if expected == "punish":
+        guard_bot.delete_message.assert_awaited_once_with(guard_group, 10)
+        assert len(await store.warnings(guard_group, 2)) == 1
+    else:
+        guard_bot.delete_message.assert_not_awaited()
+
+
+async def test_known_permitted_image_still_checks_caption(
+    guard_bot, guard_ai_job, monkeypatch
+):
+    job = await guard_ai_job(
+        policy={"ai_spam": True, "ai_images": True},
+        text=None, caption="buy this scam",
+        document={"file_id": "known", "file_unique_id": "known", "mime_type": "image/png"},
+    )
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(
+        return_value={"sanity_level": 5, "r18g": False}
+    ))
+    downloader = AsyncMock(side_effect=TimeoutError())
+    classifier = AsyncMock(return_value=(
+        AIVerdict(category="spam", confidence=1, reason="scam"), {}
+    ))
+    monkeypatch.setattr(ai, "image_data", downloader)
+    monkeypatch.setattr(ai, "classify", classifier)
+    assert await ai.process(guard_bot, job) == "punish"
+    downloader.assert_not_awaited()
+    assert classifier.call_args.args[2:4] == ("buy this scam", None)
+    assert not classifier.call_args.args[1].ai_images
 
 
 async def test_invalid_image_falls_back_to_caption_moderation(

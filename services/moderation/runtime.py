@@ -121,16 +121,29 @@ async def preprocess(update, context):
             str(message.message_id),
             {"version": version, "timestamp": timestamp, "blocked": True},
         )
-        await actions.punish(
-            context.bot,
-            chat.id,
-            user_id,
-            message.message_id,
-            incident,
-            hit["reason"],
-            warn=hit["warn"],
-            expected={"version": version},
-        )
+        try:
+            await actions.punish(
+                context.bot,
+                chat.id,
+                user_id,
+                message.message_id,
+                incident,
+                hit["reason"],
+                warn=hit["warn"],
+                expected={"version": version},
+            )
+        except (ValueError, TelegramError) as exc:
+            # A rejected/failed preflight must not let blocked content reach
+            # later command, auto-reply or image handlers.
+            await store.event(
+                chat.id,
+                "moderation",
+                status="failed",
+                user_id=user_id,
+                message_id=message.message_id,
+                reason=type(exc).__name__,
+                data={"stage": "punishment", "version": version},
+            )
         from services.message_logging import log_message_update
 
         await log_message_update(update, context)
@@ -297,7 +310,9 @@ async def membership(update, context):
                     .where(
                         GroupGuardPendingVerification.group_id == change.chat.id,
                         GroupGuardPendingVerification.user_id == user_id,
-                        GroupGuardPendingVerification.state == "pending",
+                        GroupGuardPendingVerification.state.in_(
+                            ["pending", "preparing", "processing", "restricted", "uncertain"]
+                        ),
                     )
                     .values(
                         state="external", result="其他管理员已修改成员权限，验证停止"

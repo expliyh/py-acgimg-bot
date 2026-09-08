@@ -244,31 +244,40 @@ async def process(bot, job):
         image_failure = None
         if settings.ai_images and has_image(message):
             known = await known_image_grade(message)
-            try:
-                if not config.vision_model:
-                    raise ValueError("未配置视觉模型")
-                image = await image_data(bot, message)
-            except (
-                ValueError,
-                TelegramError,
-                TimeoutError,
-                UnidentifiedImageError,
-                Image.DecompressionBombError,
-                Image.DecompressionBombWarning,
-                OSError,
-            ) as exc:
-                image_failure = exc
-        if image_failure:
-            if not text or not (settings.ai_spam or settings.ai_abuse):
-                raise image_failure
-            if not config.text_model:
-                raise ValueError("未配置文本模型")
-            classification_settings = settings.model_copy(update={"ai_images": False})
-        if not image and not config.text_model:
-            raise ValueError("未配置文本模型")
-        verdict, usage = await classify(
-            config, classification_settings, text, image, grading
+        known_verdict = AIVerdict(category="safe", confidence=1, reason="已知图片分级")
+        known_decision = (
+            disposition(known_verdict, settings, grading, known) if known else None
         )
+        text_enabled = bool(text and (settings.ai_spam or settings.ai_abuse))
+        if known and (known_decision != "allow" or not text_enabled):
+            # Authoritative catalogue metadata needs neither image bytes nor a
+            # model. Missing metadata is reviewed; forbidden grades are enforced.
+            verdict, usage = known_verdict, {}
+        else:
+            if settings.ai_images and has_image(message) and not known:
+                try:
+                    if not config.vision_model:
+                        raise ValueError("未配置视觉模型")
+                    image = await image_data(bot, message)
+                except (
+                    ValueError,
+                    TelegramError,
+                    TimeoutError,
+                    UnidentifiedImageError,
+                    Image.DecompressionBombError,
+                    Image.DecompressionBombWarning,
+                    OSError,
+                ) as exc:
+                    image_failure = exc
+            if image_failure and not text_enabled:
+                raise image_failure
+            if image_failure or known:
+                classification_settings = settings.model_copy(update={"ai_images": False})
+            if not image and not config.text_model:
+                raise ValueError("未配置文本模型")
+            verdict, usage = await classify(
+                config, classification_settings, text, image, grading
+            )
         decision = disposition(verdict, settings, grading, known)
         reason = (
             "已知图片分级不符合群组策略"

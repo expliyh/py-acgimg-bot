@@ -95,6 +95,43 @@ async def test_concurrent_duplicate_joins_start_one_verification(
     guard_bot.send_message.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    "state", ["pending", "preparing", "processing", "restricted", "uncertain"]
+)
+async def test_external_permissions_retire_all_unresolved_verifications(
+    guard_group, guard_bot, guard_message, state
+):
+    message = guard_message()
+    await verification.start(
+        guard_bot, guard_group, message.from_user, "Group", await store.policy(guard_group)
+    )
+    async with engine.new_session() as session:
+        row = await session.get(Pending, (guard_group, 2))
+        row.state = state
+        token = row.token
+        snapshot = row.original_permissions
+        await session.commit()
+    await store.put_record(guard_group, "restriction", "2", {
+        "event_id": token, "original": snapshot, "state": "active",
+    })
+    original = restricted(message.from_user)
+    await runtime.membership(
+        membership(message, guard_bot, original,
+                   original | {"can_send_photos": True}, actor=1),
+        SimpleNamespace(bot=guard_bot),
+    )
+    async with engine.new_session() as session:
+        assert (await session.get(Pending, (guard_group, 2))).state == "external"
+    assert await store.record(guard_group, "restriction", "2") is None
+    guard_bot.restrict_chat_member.reset_mock()
+    result = await actions.execute(
+        guard_bot, guard_group,
+        ActionRequest(action="unmute", user_id=2, request_id="after-external-edit"),
+    )
+    assert result["status"] == "failed"
+    guard_bot.restrict_chat_member.assert_not_awaited()
+
+
 async def timers(group_id):
     async with engine.new_session() as session:
         return [

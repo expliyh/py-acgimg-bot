@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select
 from telegram import Chat, Update, User
 from telegram.error import BadRequest, RetryAfter, TimedOut
+from telegram.ext import ApplicationHandlerStop
 
 from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
@@ -68,6 +69,27 @@ async def test_disabled_moderation_skips_admin_lookup_and_message_tracking(
     guard_bot.get_chat_member.assert_not_awaited()
     guard_bot.get_chat_administrators.assert_not_awaited()
     assert await store.record(guard_group, "message", "10") is None
+
+
+@pytest.mark.parametrize("error", [BadRequest("lookup failed"), RetryAfter(20)])
+async def test_blocked_message_stops_handlers_when_punishment_preflight_fails(
+    guard_group, guard_bot, guard_message, error
+):
+    await store.save_policy(guard_group, {"rules_enabled": True})
+    await store.put_record(
+        guard_group, "rule", "spam", Rule(kind="keyword", pattern="spam").model_dump()
+    )
+    guard_bot.get_chat_member.side_effect = error
+    update = Update(1, message=guard_message(text="spam"))
+    with pytest.raises(ApplicationHandlerStop):
+        await runtime.preprocess(update, SimpleNamespace(bot=guard_bot))
+    guard_bot.delete_message.assert_not_awaited()
+    assert await store.warnings(guard_group, 2) == []
+    async with engine.new_session() as session:
+        events = (await session.scalars(select(GuardEvent))).all()
+        assert any(row.action == "moderation" and row.status == "failed" for row in events)
+    with pytest.raises(ApplicationHandlerStop):
+        await runtime.preprocess(update, SimpleNamespace(bot=guard_bot))
 
 
 async def test_enabled_moderation_reuses_cached_admin_list(

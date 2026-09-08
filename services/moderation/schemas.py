@@ -75,6 +75,13 @@ class Policy(StrictModel):
     ai_daily_limit: int = Field(500, ge=1, le=100000)
     timezone: str = "Asia/Shanghai"
 
+    @field_validator("verification_message")
+    @classmethod
+    def verification_prompt(cls, value):
+        if value is None:
+            return None
+        return value.strip() or None
+
     @field_validator("timezone")
     @classmethod
     def timezone_exists(cls, value):

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select, update
 from telegram import User
-from telegram.error import BadRequest, TimedOut
+from telegram.error import BadRequest, RetryAfter, TimedOut
 
 from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent, GuardTask
@@ -82,6 +82,83 @@ async def test_expiration_rechecks_restriction_after_entering_action_lock(
     guard_bot.restrict_chat_member.assert_not_awaited()
     current = await store.record(guard_group, "restriction", "2")
     assert current["data"]["event_id"] == replacement["id"]
+
+
+@pytest.mark.parametrize("delay", [30, timedelta(seconds=30)])
+@pytest.mark.parametrize("stage", ["restore", "lookup"])
+async def test_rate_limited_unmute_resumes_after_delay_and_restart(
+    guard_group, guard_bot, monkeypatch, delay, stage
+):
+    clock = store.now()
+    monkeypatch.setattr(store, "now", lambda: clock)
+    await actions.execute(
+        guard_bot, guard_group,
+        ActionRequest(action="mute", user_id=2, duration=60, request_id="timed-mute"),
+    )
+    task_id = (await jobs())[0]["id"]
+    clock += timedelta(seconds=60)
+    original_lookup = guard_bot.get_chat_member.side_effect
+    if stage == "restore":
+        guard_bot.restrict_chat_member.side_effect = RetryAfter(delay)
+    else:
+        guard_bot.get_chat_member.side_effect = RetryAfter(delay)
+    await worker.Worker(guard_bot).tick()
+    task = next(row for row in await jobs() if row["id"] == task_id)
+    assert task["state"] == "pending"
+    assert task["due_at"] == clock + timedelta(seconds=30)
+    assert task["data"]["retry_attempt"] == 1
+    assert await store.record(guard_group, "restriction", "2")
+    guard_bot.restrict_chat_member.side_effect = None
+    guard_bot.get_chat_member.side_effect = original_lookup
+    guard_bot.restrict_chat_member.reset_mock()
+    restarted = worker.Worker(guard_bot)
+    await restarted.recover()
+    await restarted.tick()
+    guard_bot.restrict_chat_member.assert_not_awaited()
+    clock += timedelta(seconds=30)
+    guard_bot.restrict_chat_member.side_effect = RetryAfter(45)
+    await restarted.tick()
+    guard_bot.restrict_chat_member.assert_awaited_once()
+    task = next(row for row in await jobs() if row["id"] == task_id)
+    assert task["state"] == "pending" and task["data"]["retry_attempt"] == 2
+    assert task["due_at"] == clock + timedelta(seconds=45)
+    guard_bot.restrict_chat_member.side_effect = None
+    clock += timedelta(seconds=45)
+    await restarted.tick()
+    assert guard_bot.restrict_chat_member.await_count == 2
+    assert await store.record(guard_group, "restriction", "2") is None
+    assert next(row for row in await jobs() if row["id"] == task_id)["state"] == "done"
+
+
+@pytest.mark.parametrize("rate_limited_first", [False, True])
+async def test_uncertain_unmute_is_not_reapplied_after_task_recovery(
+    guard_group, guard_bot, monkeypatch, rate_limited_first
+):
+    clock = store.now()
+    monkeypatch.setattr(store, "now", lambda: clock)
+    await actions.execute(
+        guard_bot, guard_group,
+        ActionRequest(action="mute", user_id=2, duration=60, request_id="timed-mute"),
+    )
+    clock += timedelta(seconds=60)
+    runner = worker.Worker(guard_bot)
+    if rate_limited_first:
+        guard_bot.restrict_chat_member.side_effect = RetryAfter(30)
+        await runner.tick()
+        clock += timedelta(seconds=30)
+    guard_bot.restrict_chat_member.side_effect = TimedOut()
+    await runner.tick()
+    assert (await jobs())[0]["state"] == "uncertain"
+    guard_bot.restrict_chat_member.reset_mock()
+    guard_bot.restrict_chat_member.side_effect = None
+    for _ in range(2):
+        restarted = worker.Worker(guard_bot)
+        await restarted.recover()
+        await restarted.tick()
+        clock += timedelta(seconds=60)
+        await restarted.tick()
+    guard_bot.restrict_chat_member.assert_not_awaited()
+    assert await store.record(guard_group, "restriction", "2")
 
 
 async def test_restart_processes_expired_verification_once(guard_group, guard_bot):

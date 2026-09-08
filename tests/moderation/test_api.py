@@ -9,10 +9,10 @@ import pytest
 from sqlalchemy import select, update
 from telegram.error import BadRequest
 
-from models import Group, GuardEvent, GuardTask
+from models import Group, GroupGuardSettings, GuardEvent, GuardTask
 from registries import engine
 from services import group_guard
-from services.moderation import reviews, store
+from services.moderation import reviews, store, verification
 
 
 @pytest.fixture
@@ -47,6 +47,30 @@ async def test_web_policy_write_invalidates_telegram_cache_and_rejects_invalid_m
     assert not (await api.get(f"/api/groups/{guard_group + 1}/guard")).json()[
         "verification_enabled"
     ]
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_blank_verification_prompt_uses_default(
+    api, guard_group, guard_bot, guard_message, legacy
+):
+    root = f"/api/groups/{guard_group}/guard"
+    if legacy:
+        async with engine.new_session() as session:
+            session.add(GroupGuardSettings(
+                group_id=guard_group, verification_message=" \t\n ",
+                verification_enabled=True,
+            ))
+            await session.commit()
+    else:
+        response = await api.patch(root, json={
+            "verification_message": " \t\n ", "verification_enabled": True,
+        })
+        assert response.status_code == 200
+        assert response.json()["verification_message"] is None
+    assert (await api.get(root)).json()["verification_message"] is None
+    message = guard_message()
+    await verification.joined(guard_bot, message.chat, message.from_user)
+    assert "请在" in guard_bot.send_message.call_args.args[1]
 
 
 async def test_action_retries_are_idempotent_and_logged_as_deployment_admin(

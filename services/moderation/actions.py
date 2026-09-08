@@ -359,6 +359,11 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
     except (ValueError, TelegramError) as exc:
         # Avoid exposing provider URLs/tokens through error text.
         data["error"] = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+        if isinstance(exc, RetryAfter):
+            delay = exc.retry_after
+            data["retry_after"] = (
+                delay.total_seconds() if isinstance(delay, timedelta) else delay
+            )
         status = "uncertain" if is_uncertain_error(exc) else "failed"
         if req.action == "mute" and status == "failed":
             restriction = await store.record(group_id, "restriction", str(req.user_id))
