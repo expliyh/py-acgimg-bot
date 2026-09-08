@@ -28,6 +28,7 @@ from services.moderation.schemas import (
     PolicyPatch,
     ReviewDecision,
     Rule,
+    validate_record_name,
 )
 
 
@@ -117,8 +118,10 @@ async def list_rules(group_id: int):
 
 @router.put("/rules/{rule_id}")
 async def put_rule(group_id: int, rule_id: str, payload: Rule):
-    if len(rule_id) > 100:
-        raise HTTPException(422, "规则名称过长")
+    try:
+        rule_id = validate_record_name(rule_id, "规则名称")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return await store.put_record(
         group_id, "rule", rule_id, payload.model_dump(), payload.enabled
     )

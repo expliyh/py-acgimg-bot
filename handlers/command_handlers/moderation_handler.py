@@ -9,7 +9,12 @@ from telegram.error import TelegramError
 
 from handlers.registry import bot_handler
 from services.moderation import actions, reviews, rules, store, worker
-from services.moderation.schemas import ActionRequest, Content, Rule
+from services.moderation.schemas import (
+    ActionRequest,
+    Content,
+    Rule,
+    validate_record_name,
+)
 
 CATEGORIES = {
     "join": (
@@ -157,11 +162,13 @@ async def guard_extra(update, context):
                     or "暂无规则"
                 )
             elif args[1] == "remove":
-                removed = await store.remove_record(chat.id, "rule", args[2])
+                name = validate_record_name(args[2], "规则名称")
+                removed = await store.remove_record(chat.id, "rule", name)
                 await message.reply_text("已删除" if removed else "规则不存在")
             else:
+                name = validate_record_name(args[2], "规则名称")
                 rule = Rule(kind=args[3], pattern=" ".join(args[4:]))
-                await store.put_record(chat.id, "rule", args[2], rule.model_dump())
+                await store.put_record(chat.id, "rule", name, rule.model_dump())
                 await message.reply_text(
                     "规则已保存；通过 /guard set rules_enabled on 启用审核"
                 )

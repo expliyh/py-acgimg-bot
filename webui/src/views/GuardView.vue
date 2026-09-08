@@ -306,9 +306,11 @@ async function load() {
     reviewPage.value = 1;
     logPage.value = 1;
     taskPage.value = 1;
-    permissions.value = await guardApi
+    const loadedPermissions = await guardApi
       .permissions(id)
       .catch((e) => ({ error: detailError(e) }));
+    if (version !== loadVersion) return;
+    permissions.value = loadedPermissions;
   } catch (e) {
     if (version === loadVersion) error.value = detailError(e);
   } finally {

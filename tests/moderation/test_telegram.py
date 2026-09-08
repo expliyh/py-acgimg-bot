@@ -241,6 +241,26 @@ async def test_failed_verification_restore_never_reports_passed(guard_group, gua
         assert (await session.get(Pending, (guard_group, 2))).state == "uncertain"
 
 
+async def test_repeated_join_does_not_replace_unresolved_verification(
+    guard_group, guard_bot
+):
+    user = User(2, "New", False)
+    await verification.start(guard_bot, guard_group, user, "Group", Policy())
+    async with engine.new_session() as session:
+        row = await session.get(Pending, (guard_group, 2))
+        token = row.token
+        row.state = "uncertain"
+        await session.commit()
+    guard_bot.restrict_chat_member.reset_mock()
+
+    await verification.start(guard_bot, guard_group, user, "Group", Policy())
+
+    guard_bot.restrict_chat_member.assert_not_awaited()
+    async with engine.new_session() as session:
+        row = await session.get(Pending, (guard_group, 2))
+        assert row.token == token and row.state == "uncertain"
+
+
 async def test_join_requests_remain_disabled_by_default(guard_group, guard_bot):
     update = SimpleNamespace(
         chat_join_request=SimpleNamespace(chat=Chat(guard_group, "supergroup"))
@@ -279,6 +299,34 @@ async def test_join_auto_approval_permission_failure_falls_back_to_review(
         )
     assert receipt.status == "success"
     assert receipt.data["review"] is True
+
+
+async def test_join_auto_approval_bad_request_is_definitive_failure(
+    guard_group, guard_bot
+):
+    await store.save_policy(
+        guard_group,
+        {"join_requests_enabled": True, "join_auto_approve": True},
+    )
+    guard_bot.approve_chat_join_request.side_effect = BadRequest("request expired")
+    request = SimpleNamespace(
+        chat=Chat(guard_group, "supergroup"),
+        from_user=User(2, "Applicant", False),
+        date=datetime.now(timezone.utc),
+    )
+
+    await verification.join_request(
+        SimpleNamespace(chat_join_request=request), SimpleNamespace(bot=guard_bot)
+    )
+
+    async with engine.new_session() as session:
+        receipt = await session.scalar(
+            select(GuardEvent).where(
+                GuardEvent.group_id == guard_group,
+                GuardEvent.action == "join_request",
+            )
+        )
+    assert receipt.status == "failed"
 
 
 async def test_report_rate_limit_and_message_deduplication(

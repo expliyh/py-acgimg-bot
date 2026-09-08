@@ -171,10 +171,44 @@ async def test_delete_failure_and_kick_partial_are_not_success(tg):
     assert result["status"] == "uncertain"
     assert result["data"]["ban"] == "success"
     ban_until = datetime.fromisoformat(result["data"]["ban_until"])
-    assert datetime.now(timezone.utc) < ban_until <= datetime.now(
-        timezone.utc
-    ) + timedelta(minutes=1)
+    assert (
+        datetime.now(timezone.utc)
+        < ban_until
+        <= datetime.now(timezone.utc) + timedelta(minutes=1)
+    )
     assert tg.ban_chat_member.call_args.kwargs["until_date"] == ban_until
+
+
+async def test_delete_timeout_is_uncertain_and_stops_purge(tg):
+    tg.delete_message.side_effect = TimedOut()
+    result = await actions.execute(
+        tg,
+        GROUP,
+        ActionRequest(action="delete", message_id=10, request_id="delete-timeout"),
+    )
+    assert result["status"] == "uncertain"
+    assert result["data"]["uncertain"] == [10]
+
+    tg.delete_message.reset_mock(side_effect=True)
+    tg.delete_message.side_effect = [None, TimedOut()]
+    result = await actions.execute(
+        tg,
+        GROUP,
+        ActionRequest(
+            action="purge",
+            message_id=10,
+            end_message_id=12,
+            request_id="purge-timeout",
+        ),
+    )
+    assert result["status"] == "uncertain"
+    assert result["data"] == {
+        "deleted": [10],
+        "failed": [],
+        "uncertain": [11],
+        "unattempted": [12],
+    }
+    assert tg.delete_message.await_count == 2
 
 
 async def test_unmute_preserves_group_defaults_and_external_changes(tg):
@@ -221,6 +255,12 @@ def test_hidden_links_and_caption():
     assert rules.matches({"kind": "link"}, msg, [])
     assert rules.matches(
         {"kind": "keyword", "pattern": "spam"}, message(None, caption="SPAM"), []
+    )
+
+
+def test_allowlisted_link_ignores_sentence_punctuation():
+    assert not rules.matches(
+        {"kind": "link"}, message("See https://example.com)."), ["example.com"]
     )
 
 
@@ -458,6 +498,57 @@ async def test_migrate_group_state():
     assert (await store.policy(GROUP - 1)).flood_enabled
     assert not (await store.policy(GROUP)).flood_enabled
     assert await store.record(GROUP - 1, "exempt", "2")
+    await runtime.migrate(GROUP, GROUP - 1)
+    assert (await store.policy(GROUP - 1)).flood_enabled
+    assert await store.record(GROUP - 1, "exempt", "2")
+
+
+async def test_migrate_keeps_new_target_rows_on_natural_key_collision():
+    new_id = GROUP - 1
+    await store.put_record(GROUP, "message", "7", {"version": "old"})
+    await store.put_record(new_id, "message", "7", {"version": "new"})
+    async with engine.new_session() as session:
+        session.add_all(
+            [
+                Pending(
+                    group_id=GROUP,
+                    user_id=2,
+                    token="old-token",
+                    expires_at=store.now() + timedelta(minutes=1),
+                    state="pending",
+                ),
+                Pending(
+                    group_id=new_id,
+                    user_id=2,
+                    token="new-token",
+                    expires_at=store.now() + timedelta(minutes=1),
+                    state="pending",
+                ),
+            ]
+        )
+        await session.commit()
+
+    await runtime.migrate(GROUP, new_id)
+
+    assert (await store.record(new_id, "message", "7"))["data"]["version"] == "new"
+    assert await store.record(GROUP, "message", "7") is None
+    async with engine.new_session() as session:
+        assert (await session.get(Pending, (new_id, 2))).token == "new-token"
+        assert await session.get(Pending, (GROUP, 2)) is None
+
+
+async def test_bad_request_mute_is_failed_and_does_not_block_retry(tg):
+    tg.restrict_chat_member.side_effect = BadRequest("not enough rights")
+    failed = await actions.execute(tg, GROUP, request(action="mute", key="bad-mute"))
+    assert failed["status"] == "failed"
+    assert await store.record(GROUP, "restriction", "2") is None
+
+    tg.restrict_chat_member.side_effect = None
+    retried = await actions.execute(tg, GROUP, request(action="mute", key="retry-mute"))
+    assert retried["status"] == "success"
+    assert (await store.record(GROUP, "restriction", "2"))["data"][
+        "event_id"
+    ] == retried["id"]
 
 
 async def test_migrate_overwrites_default_target_group_settings():
@@ -489,6 +580,16 @@ async def test_migrate_overwrites_default_target_group_settings():
         assert migrated.allow_r18g is True
         assert migrated.allow_setu is False
         assert migrated.admin_ids == [1, 2]
+        migrated.allow_setu = True
+        migrated.name = "Upgraded group"
+        await session.commit()
+
+    await runtime.migrate(GROUP, new_id)
+
+    async with engine.new_session() as session:
+        migrated = await session.get(Group, new_id)
+        assert migrated.allow_setu is True
+        assert migrated.name == "Upgraded group"
 
 
 async def test_sqlite_legacy_migration_is_repeatable():

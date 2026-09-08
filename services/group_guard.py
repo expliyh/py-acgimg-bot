@@ -5,6 +5,7 @@ import logging
 import random
 import re
 import string
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -228,7 +229,13 @@ async def add_keyword_rule(
     case_sensitive: bool = False,
 ) -> KeywordRule:
     raw_pattern = (pattern or "").strip()
-    if not raw_pattern:
+    if not raw_pattern or (
+        not is_regex
+        and not any(
+            unicodedata.category(c) != "Cf" and not c.isspace()
+            for c in unicodedata.normalize("NFKC", raw_pattern)
+        )
+    ):
         raise ValueError("关键字不能为空")
 
     if len(raw_pattern) > MAX_KEYWORD_PATTERN_LENGTH:

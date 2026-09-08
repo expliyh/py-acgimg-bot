@@ -78,11 +78,14 @@ def version(message) -> str:
 
 def links(message) -> list[str]:
     text = message.text or message.caption or ""
-    result = re.findall(
-        r"(?:https?://|www\.)[^\s<>]+|(?:t\.me|telegram\.me)/[^\s<>]+",
-        text,
-        re.IGNORECASE,
-    )
+    result = [
+        value.rstrip(".,!?;:)]}>\"'…，。！？；：）》】")
+        for value in re.findall(
+            r"(?:https?://|www\.)[^\s<>]+|(?:t\.me|telegram\.me)/[^\s<>]+",
+            text,
+            re.IGNORECASE,
+        )
+    ]
     for entity, value in (
         message.parse_entities() | message.parse_caption_entities()
     ).items():
@@ -110,10 +113,11 @@ def matches(rule: dict, message, allowlist) -> bool:
     kind, pattern = rule["kind"], rule.get("pattern", "")
     text = message.text or message.caption or ""
     if kind == "keyword":
+        normalized_pattern = normalize(pattern)
         return (
             pattern in text
             if rule.get("case_sensitive")
-            else normalize(pattern) in normalize(text)
+            else bool(normalized_pattern) and normalized_pattern in normalize(text)
         )
     if kind == "regex":
         try:

@@ -14,6 +14,11 @@ from . import store
 from .schemas import ActionRequest
 
 
+def is_uncertain_error(exc: BaseException) -> bool:
+    """Return whether Telegram may have applied an operation without replying."""
+    return isinstance(exc, TimedOut) or type(exc) is NetworkError
+
+
 async def is_admin(bot, group_id: int, user_id: int) -> bool:
     member = await bot.get_chat_member(group_id, user_id)
     return member.status in {"creator", "administrator"}
@@ -244,9 +249,7 @@ async def _execute_locked(bot, group_id, req, source):
                 await store.remove_record(group_id, "restriction", str(req.user_id))
             elif req.action == "kick":
                 ban_until = datetime.now(timezone.utc) + timedelta(minutes=1)
-                await bot.ban_chat_member(
-                    group_id, req.user_id, until_date=ban_until
-                )
+                await bot.ban_chat_member(group_id, req.user_id, until_date=ban_until)
                 data["ban"] = "success"
                 data["ban_until"] = ban_until.isoformat()
                 await bot.unban_chat_member(group_id, req.user_id, only_if_banned=True)
@@ -288,7 +291,17 @@ async def _execute_locked(bot, group_id, req, source):
                     return await store.finish_event(
                         row["id"], "partial" if deleted else "failed", data
                     )
-                except TelegramError:
+                except TelegramError as exc:
+                    if is_uncertain_error(exc):
+                        data = {
+                            "deleted": deleted,
+                            "failed": failed,
+                            "uncertain": [message_id],
+                            "unattempted": [
+                                value for value in ids if value > message_id
+                            ],
+                        }
+                        return await store.finish_event(row["id"], "uncertain", data)
                     failed.append(message_id)
             data = {"deleted": deleted, "failed": failed}
             if failed:
@@ -299,7 +312,7 @@ async def _execute_locked(bot, group_id, req, source):
     except (ValueError, TelegramError) as exc:
         # Avoid exposing provider URLs/tokens through error text.
         data["error"] = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
-        status = "uncertain" if isinstance(exc, (TimedOut, NetworkError)) else "failed"
+        status = "uncertain" if is_uncertain_error(exc) else "failed"
         if req.action == "mute" and status == "failed":
             await store.remove_record(group_id, "restriction", str(req.user_id))
         return await store.finish_event(row["id"], status, data)
@@ -318,6 +331,10 @@ async def punish(
     expected=None,
 ):
     results = []
+    content_version = expected.get("version") if expected else None
+    delete_request_id = f"delete:{message_id}"
+    if content_version:
+        delete_request_id += f":{content_version}"
     results.append(
         await execute(
             bot,
@@ -326,7 +343,7 @@ async def punish(
                 action="delete",
                 user_id=user_id,
                 message_id=message_id,
-                request_id=f"delete:{message_id}",
+                request_id=delete_request_id,
                 reason=reason,
             ),
             source=source,

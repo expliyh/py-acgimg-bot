@@ -1,3 +1,4 @@
+import unicodedata
 from datetime import datetime
 from typing import Literal
 from urllib.parse import urlparse
@@ -14,6 +15,17 @@ from pydantic import (
 
 VERIFICATION_MESSAGE_MAX_LENGTH = 2000
 ACTION_REASON_MAX_LENGTH = 1000
+
+
+def validate_record_name(value: str, label: str = "名称") -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{label}不能为空")
+    if len(value) > 100:
+        raise ValueError(f"{label}过长")
+    if "/" in value or value in {".", ".."}:
+        raise ValueError(f"{label}必须是安全的路径片段")
+    return value
 
 
 class StrictModel(BaseModel):
@@ -107,7 +119,13 @@ class Rule(StrictModel):
 
     @model_validator(mode="after")
     def valid_pattern(self):
-        if self.kind in {"keyword", "regex", "media"} and not self.pattern.strip():
+        stripped = self.pattern.strip()
+        if self.kind in {"keyword", "regex", "media"} and not stripped:
+            raise ValueError("规则内容不能为空")
+        if self.kind == "keyword" and not any(
+            unicodedata.category(c) != "Cf" and not c.isspace()
+            for c in unicodedata.normalize("NFKC", self.pattern)
+        ):
             raise ValueError("规则内容不能为空")
         if self.kind == "regex":
             import regex
@@ -189,12 +207,7 @@ class Content(StrictModel):
     @field_validator("name")
     @classmethod
     def normalized_name(cls, value):
-        value = value.strip()
-        if not value:
-            raise ValueError("内容名称不能为空")
-        if "/" in value:
-            raise ValueError("内容名称不能包含斜杠")
-        return value
+        return validate_record_name(value, "内容名称")
 
     @model_validator(mode="after")
     def schedule(self):

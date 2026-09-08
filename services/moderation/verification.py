@@ -26,7 +26,13 @@ async def start(bot, group_id, member, title, settings, *, force=False):
     async with store.lock(group_id):
         async with engine.new_session() as session:
             previous = await session.get(Pending, (group_id, member.id))
-            if previous and previous.state in {"pending", "processing"}:
+            if previous and previous.state in {
+                "pending",
+                "preparing",
+                "processing",
+                "restricted",
+                "uncertain",
+            }:
                 return
         await actions.require_right(bot, group_id, "can_restrict_members")
         snapshot = actions.permissions_snapshot(
@@ -353,7 +359,9 @@ async def join_request(update, context):
             await store.finish_event(receipt["id"], "success", {"approved": True})
         except TelegramError as exc:
             await store.finish_event(
-                receipt["id"], "uncertain", {"error": type(exc).__name__}
+                receipt["id"],
+                "uncertain" if actions.is_uncertain_error(exc) else "failed",
+                {"error": type(exc).__name__},
             )
     else:
         await create_review()

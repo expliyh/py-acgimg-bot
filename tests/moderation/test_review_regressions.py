@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select, update
 from telegram import ChatMemberRestricted, Update
+from telegram.error import BadRequest
 
 from handlers.command_handlers import moderation_handler as commands
 from models import GroupGuardPendingVerification as Pending
@@ -30,6 +31,8 @@ from services.moderation.schemas import (
     AIVerdict,
     Content,
     Policy,
+    Rule,
+    validate_record_name,
 )
 
 
@@ -260,6 +263,105 @@ async def test_combined_rule_reason_fits_action_request(guard_group, guard_messa
     )
 
 
+async def test_new_message_version_retries_definitive_delete_failure(
+    guard_group, guard_bot
+):
+    await store.put_record(
+        guard_group, "message", "10", {"version": "version-one", "blocked": False}
+    )
+    guard_bot.delete_message.side_effect = BadRequest("missing permission")
+    first = await actions.punish(
+        guard_bot,
+        guard_group,
+        2,
+        10,
+        "message:10",
+        "spam",
+        warn=False,
+        expected={"version": "version-one"},
+    )
+    assert first[0]["status"] == "failed"
+
+    await store.put_record(
+        guard_group, "message", "10", {"version": "version-two", "blocked": False}
+    )
+    guard_bot.delete_message.side_effect = None
+    second = await actions.punish(
+        guard_bot,
+        group_id=guard_group,
+        user_id=2,
+        message_id=10,
+        incident="message:10",
+        reason="spam",
+        warn=False,
+        expected={"version": "version-two"},
+    )
+    assert second[0]["status"] == "success"
+    assert guard_bot.delete_message.await_count == 2
+
+
+async def test_unicode_format_only_keywords_are_rejected(guard_group):
+    with pytest.raises(ValueError, match="不能为空"):
+        Rule(kind="keyword", pattern="\u200b\u200d")
+    with pytest.raises(ValueError, match="不能为空"):
+        await group_guard.add_keyword_rule(guard_group, "\u200b\u200d")
+    assert not rules.matches(
+        {"kind": "keyword", "pattern": "\u200b"},
+        SimpleNamespace(text="ordinary", caption=None),
+        [],
+    )
+
+
+async def test_legacy_empty_normalized_reply_does_not_match_every_message(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"replies_enabled": True})
+    await store.put_record(
+        guard_group,
+        "reply",
+        "\u200b",
+        {"kind": "reply", "name": "\u200b", "text": "unexpected"},
+    )
+
+    await runtime.operations(
+        Update(1, message=guard_message(text="ordinary")),
+        SimpleNamespace(bot=guard_bot),
+    )
+
+    guard_bot.send_message.assert_not_awaited()
+
+
+def test_rule_names_are_safe_api_path_segments():
+    assert validate_record_name("  spam  ", "规则名称") == "spam"
+    with pytest.raises(ValueError, match="不能为空"):
+        validate_record_name(" \t ", "规则名称")
+    with pytest.raises(ValueError, match="路径片段"):
+        validate_record_name("folder/rule", "规则名称")
+    with pytest.raises(ValueError, match="路径片段"):
+        validate_record_name("..", "规则名称")
+    with pytest.raises(ValueError, match="过长"):
+        validate_record_name("x" * 101, "规则名称")
+
+
+async def test_migrate_from_service_message_moves_guard_state(
+    guard_group, guard_bot, guard_message
+):
+    new_id = guard_group - 1
+    await store.save_policy(guard_group, {"flood_enabled": True})
+    update = Update(
+        1,
+        message=guard_message(
+            chat={"id": new_id, "type": "supergroup", "title": "Upgraded"},
+            migrate_from_chat_id=guard_group,
+        ),
+    )
+
+    await runtime.preprocess(update, SimpleNamespace(bot=guard_bot))
+
+    assert (await store.policy(new_id)).flood_enabled
+    assert not (await store.policy(guard_group)).flood_enabled
+
+
 PHOTO = [
     {"file_id": "photo", "file_unique_id": "unique-photo", "width": 100, "height": 100}
 ]
@@ -450,6 +552,25 @@ async def test_report_reply_never_overwrites_newer_observed_version(
     )
     assert result["data"]["state"] == "failed"
     guard_bot.delete_message.assert_not_awaited()
+
+
+async def test_exempt_member_edit_still_invalidates_older_review_version(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"rules_enabled": True})
+    original = guard_message(text="old text")
+    context = SimpleNamespace(bot=guard_bot)
+    await runtime.preprocess(Update(1, message=original), context)
+    await store.put_record(guard_group, "exempt", "2", {})
+    edited = guard_message(
+        text="new text", edit_date=int(original.date.timestamp()) + 1
+    )
+
+    await runtime.preprocess(Update(2, edited_message=edited), context)
+
+    assert (await store.record(guard_group, "message", "10"))["data"][
+        "version"
+    ] == rules.version(edited)
 
 
 async def test_edited_message_can_be_reported_again_after_stale_review(

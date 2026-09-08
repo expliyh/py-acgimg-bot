@@ -48,6 +48,9 @@ async def preprocess(update, context):
     if message.migrate_to_chat_id:
         await migrate(chat.id, message.migrate_to_chat_id)
         return
+    if message.migrate_from_chat_id:
+        await migrate(message.migrate_from_chat_id, chat.id)
+        return
     settings = await store.policy(chat.id)
     for member in message.new_chat_members or []:
         await member_joined(context.bot, chat, member, message.date)
@@ -95,6 +98,8 @@ async def preprocess(update, context):
             return  # Cannot safely classify an unknown administrator as an ordinary member.
         exempt = await store.record(chat.id, "exempt", str(user_id))
         if exempt and exempt["enabled"]:
+            if message.edit_date:
+                await remember_message(chat.id, message)
             return
     incident = (
         f"album:{message.media_group_id}"
@@ -121,6 +126,7 @@ async def preprocess(update, context):
             incident,
             hit["reason"],
             warn=hit["warn"],
+            expected={"version": version},
         )
         from services.message_logging import log_message_update
 
@@ -313,16 +319,31 @@ async def operations(update, context):
     settings = await store.policy(chat.id)
     if settings.replies_enabled:
         for row in await store.records(chat.id, "reply", enabled=True):
-            if rules.normalize(row["key"]) in rules.normalize(message.text):
+            key = rules.normalize(row["key"])
+            if key and key in rules.normalize(message.text):
                 if len(rules.window((chat.id, "reply", row["key"]), 10)) == 1:
                     await message.reply_text(row["data"]["text"])
                 break
 
 
 async def migrate(old_id, new_id):
-    async with store.lock(old_id), engine.new_session() as session:
+    if old_id == new_id:
+        return
+    first_id, second_id = sorted((old_id, new_id))
+    async with (
+        store.lock(first_id),
+        store.lock(second_id),
+        engine.new_session() as session,
+    ):
+        migration_marker = await session.scalar(
+            select(GuardRecord).where(
+                GuardRecord.group_id == new_id,
+                GuardRecord.kind == "migration",
+                GuardRecord.key == str(old_id),
+            )
+        )
         old_group = await session.get(Group, old_id)
-        if old_group:
+        if old_group and migration_marker is None:
             data = {
                 c.name: getattr(old_group, c.name)
                 for c in Group.__table__.columns
@@ -334,10 +355,36 @@ async def migrate(old_id, new_id):
                     setattr(new_group, key, value)
             else:
                 session.add(Group(id=new_id, **data))
-        existing = await session.get(GroupGuardSettings, new_id)
-        if existing:
-            await session.delete(existing)
-            await session.flush()
+        source_settings = await session.get(GroupGuardSettings, old_id)
+        if source_settings:
+            existing = await session.get(GroupGuardSettings, new_id)
+            if existing:
+                await session.delete(existing)
+                await session.flush()
+        # Telegram may deliver updates for the upgraded group before its migration
+        # service message. Keep those newer target rows when a natural key collides.
+        for model, key in (
+            (GroupGuardPendingVerification, lambda row: row.user_id),
+            (GuardRecord, lambda row: (row.kind, row.key)),
+            (
+                GuardEvent,
+                lambda row: (row.incident, row.action) if row.incident else None,
+            ),
+        ):
+            source_rows = (
+                await session.scalars(select(model).where(model.group_id == old_id))
+            ).all()
+            target_keys = {
+                value
+                for row in (
+                    await session.scalars(select(model).where(model.group_id == new_id))
+                ).all()
+                if (value := key(row)) is not None
+            }
+            for row in source_rows:
+                if key(row) in target_keys:
+                    await session.delete(row)
+        await session.flush()
         for model in (
             GroupGuardSettings,
             GroupGuardKeywordRule,
@@ -350,6 +397,17 @@ async def migrate(old_id, new_id):
                 sql_update(model)
                 .where(model.group_id == old_id)
                 .values(group_id=new_id)
+            )
+        if migration_marker is None:
+            session.add(
+                GuardRecord(
+                    id=store.uid(),
+                    group_id=new_id,
+                    kind="migration",
+                    key=str(old_id),
+                    data={},
+                    created_at=store.now(),
+                )
             )
         await session.commit()
     from services import group_guard
