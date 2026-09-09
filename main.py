@@ -87,6 +87,11 @@ async def lifespan(app: FastAPI):
             await frontend_launcher.stop_frontend_dev_server()
         except Exception:
             logger.exception("Error while stopping frontend dev server")
+        try:
+            if engine.engine is not None:
+                await engine.engine.dispose()
+        except Exception:
+            logger.exception("Error while disposing database engine")
 
 
 app = FastAPI(lifespan=lifespan)
