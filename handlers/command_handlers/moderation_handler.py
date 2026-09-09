@@ -129,6 +129,7 @@ async def guard_extra(update, context):
                 "/guard content announcement 名称 ISO时间 once|daily|weekly 内容\n"
                 "/guard content list | remove 类型 名称\n"
                 "/guard exempt 用户ID on|off\n"
+                "/verify @username、用户ID，或回复目标消息：重新触发入群验证\n"
                 "/warn /warns /unwarn /mute /unmute /kick /ban /unban：回复消息或提供用户ID\n"
                 "/mute 用户ID 30m 原因；时长支持 m/h/d\n"
                 "/report 回复举报；/rules 群规；/notes 名称\n"

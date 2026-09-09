@@ -1,10 +1,17 @@
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import User
 from defines import UserStatus
 
 from .engine import engine
+
+
+def normalize_username(username: str | None) -> str | None:
+    """Return Telegram usernames in a stable form for lookup."""
+
+    value = (username or "").strip().lstrip("@").casefold()
+    return value or None
 
 
 async def add_user(user: User) -> None:
@@ -24,6 +31,35 @@ async def get_user_by_id(user_id: int) -> User:
             await add_user(new_user)
             return await get_user_by_id(user_id)
         return user
+
+
+async def sync_telegram_user(user_id: int, username: str | None) -> None:
+    """Persist the latest Telegram username for future command resolution."""
+
+    normalized = normalize_username(username)
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        user = await session.get(User, user_id)
+        if user is None:
+            user = User(id=user_id, username=normalized)
+            session.add(user)
+        elif user.username != normalized:
+            user.username = normalized
+        await session.commit()
+
+
+async def find_user_ids_by_username(username: str) -> list[int]:
+    """Return all matching IDs so callers can reject stale/ambiguous indexes."""
+
+    normalized = normalize_username(username)
+    if not normalized:
+        return []
+    async with engine.new_session() as session:
+        session: AsyncSession = session
+        result = await session.execute(
+            select(User.id).where(func.lower(User.username) == normalized)
+        )
+        return list(result.scalars().all())
 
 
 async def set_sanity_limit(user_id: int, sanity_limit: int) -> None:

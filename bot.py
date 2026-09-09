@@ -21,6 +21,7 @@ BOT_COMMAND_DEFINITIONS: list[tuple[str, str]] = [
     ("admin", "\u6253\u5f00\u7ba1\u7406\u9762\u677f"),
     ("pinfo", "\u67e5\u770b Pixiv \u63d2\u753b\u4fe1\u606f"),
     ("guard", "智能群管配置"),
+    ("verify", "重新触发入群验证"),
     ("rules", "查看群规"),
     ("report", "回复消息举报"),
     ("notes", "查看群笔记"),

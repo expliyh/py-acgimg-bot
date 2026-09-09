@@ -156,6 +156,44 @@ async def _add_manual_illustration_metadata(conn: AsyncConnection) -> None:
             )
 
 
+async def _add_user_username(conn: AsyncConnection) -> None:
+    """Add the normalized Telegram username lookup column and its index."""
+
+    table_name = f"{file_config.db_prefix}users"
+
+    def inspect_table(sync_conn):
+        inspector = inspect(sync_conn)
+        if not inspector.has_table(table_name):
+            return set(), []
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        indexes = inspector.get_indexes(table_name)
+        return columns, indexes
+
+    columns, indexes = await conn.run_sync(inspect_table)
+    if not columns:
+        logger.debug("Users table %s not found while adding username", table_name)
+        return
+    if "username" not in columns:
+        await conn.execute(
+            text(
+                f"ALTER TABLE {_quote(table_name)} "
+                f"ADD COLUMN {_quote('username')} VARCHAR(32) NULL"
+            )
+        )
+
+    has_username_index = any(
+        "username" in (index.get("column_names") or []) for index in indexes
+    )
+    if not has_username_index:
+        index_name = f"idx_{table_name}_username"
+        await conn.execute(
+            text(
+                f"CREATE INDEX {_quote(index_name)} ON {_quote(table_name)} "
+                f"({_quote('username')})"
+            )
+        )
+
+
 async def _ensure_column_bigint(
     conn: AsyncConnection,
     schema: str,
@@ -321,6 +359,7 @@ async def _add_guard_verification_completion_time(conn: AsyncConnection) -> None
 
 
 _MIGRATIONS: tuple[Migration, ...] = (
+    Migration(7, "Add Telegram username lookup", _add_user_username),
     Migration(
         6, "Track verification terminal transitions", _add_guard_verification_completion_time
     ),
