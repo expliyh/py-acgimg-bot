@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
 from telegram import ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 
 from models import GroupGuardPendingVerification as Pending
 from registries import engine
@@ -91,6 +91,7 @@ async def start(
             row.token, row.expires_at, row.state = token, deadline, "preparing"
             row.original_permissions, row.answer, row.result = snapshot, answer, None
             row.message_id = None
+            row.completed_at = None
             await session.commit()
         await store.task(
             group_id, "verify", deadline, {"user_id": member.id, "token": token}
@@ -117,7 +118,7 @@ async def start(
                 await session.execute(
                     update(Pending)
                     .where(Pending.token == token)
-                    .values(state=state, result=result)
+                    .values(**store.verification_outcome(state, result))
                 )
                 await session.commit()
             await store.event(
@@ -170,16 +171,20 @@ async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
                     await bot.unban_chat_member(group_id, user_id, only_if_banned=True)
                     status, text = "removed", "验证超时，已移出群组"
                 else:
-                    await store.put_record(
-                        group_id,
-                        "restriction",
-                        str(user_id),
-                        {
-                            "original": values["original_permissions"] or {},
-                            "state": "active",
-                            "event_id": token,
-                        },
-                    )
+                    # A later moderation mute owns its own deadline and snapshot.
+                    # Its expiration restores the verification restriction; the
+                    # pending verification retains the earlier recovery snapshot.
+                    if not await store.record(group_id, "restriction", str(user_id)):
+                        await store.put_record(
+                            group_id,
+                            "restriction",
+                            str(user_id),
+                            {
+                                "original": values["original_permissions"] or {},
+                                "state": "active",
+                                "event_id": token,
+                            },
+                        )
                     status, text = "restricted", "验证超时，保持限制发言"
             else:
                 # A later moderation mute must survive passing verification.
@@ -205,7 +210,7 @@ async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
             await session.execute(
                 update(Pending)
                 .where(Pending.token == token)
-                .values(state=status, result=text)
+                .values(**store.verification_outcome(status, text))
             )
             await session.commit()
         await store.event(
@@ -380,6 +385,13 @@ async def join_request(update, context):
             await context.bot.approve_chat_join_request(group_id, request.from_user.id)
             await store.finish_event(receipt["id"], "success", {"approved": True})
         except TelegramError as exc:
+            if isinstance(exc, RetryAfter):
+                # Approval was rejected, so an administrator may safely retry
+                # from the durable review even if its notification is rate limited.
+                await create_review(
+                    {"auto_approve": "rate_limited", "error": "RetryAfter"}
+                )
+                return
             await store.finish_event(
                 receipt["id"],
                 "uncertain" if actions.is_uncertain_error(exc) else "failed",

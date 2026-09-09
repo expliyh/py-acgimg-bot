@@ -399,6 +399,22 @@ class Worker:
             self.last_cleanup = store.now()
 
     async def dispatch(self, job):
+        # A queued snapshot may predate migration. Reload while holding the same
+        # group lease as migration, and follow a moved row before doing any work.
+        while True:
+            group_id = job["group_id"]
+            async with store.task_lock(group_id).read():
+                async with engine.new_session() as session:
+                    row = await session.get(GuardTask, job["id"])
+                    if not row or row.state not in {"pending", "running"}:
+                        return
+                    job = store.dump(row)
+                if job["group_id"] != group_id:
+                    continue
+                await self._dispatch(job)
+                return
+
+    async def _dispatch(self, job):
         data, group_id, kind = job["data"], job["group_id"], job["kind"]
         try:
             result = "success"
@@ -521,6 +537,7 @@ class Worker:
             groups = (
                 await session.scalars(
                     select(GuardEvent.group_id).union(
+                        select(Pending.group_id),
                         select(GuardTask.group_id),
                         select(GuardRecord.group_id).where(
                             GuardRecord.kind == "review"
@@ -536,6 +553,13 @@ class Worker:
                 days=max(settings.log_days, settings.warning_days)
             )
             async with engine.new_session() as session:
+                await session.execute(
+                    delete(Pending).where(
+                        Pending.group_id == group_id,
+                        Pending.state.in_(Pending.TERMINAL_STATES),
+                        Pending.completed_at < review_cutoff,
+                    )
+                )
                 expired_reviews = (
                     await session.scalars(
                         select(GuardRecord).where(

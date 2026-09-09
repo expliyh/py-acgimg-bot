@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from sqlalchemy import update
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 
 from models import GuardRecord
 from registries import engine
@@ -129,7 +129,10 @@ async def decide(
                 else "failed"
             )
     except (ValueError, TelegramError) as exc:
-        status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
+        if isinstance(exc, RetryAfter) and decision in {"approve_join", "reject_join"}:
+            status = "pending"  # Telegram rejected this attempt; keep the review actionable.
+        else:
+            status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
         results = [
             {"error": str(exc) if isinstance(exc, ValueError) else type(exc).__name__}
         ]

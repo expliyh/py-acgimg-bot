@@ -250,7 +250,11 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
                         await session.execute(
                             update(Pending)
                             .where(Pending.token == token)
-                            .values(state="cancelled", result="管理员解除验证限制")
+                            .values(
+                                **store.verification_outcome(
+                                    "cancelled", "管理员解除验证限制"
+                                )
+                            )
                         )
                         await session.commit()
                     return await store.finish_event(
@@ -283,7 +287,11 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
                                 ]
                             ),
                         )
-                        .values(state="cancelled", result="管理员解除验证限制")
+                        .values(
+                            **store.verification_outcome(
+                                "cancelled", "管理员解除验证限制"
+                            )
+                        )
                     )
                     await session.execute(
                         delete(GuardRecord).where(

@@ -54,6 +54,7 @@ class GroupGuardKeywordRule(Base):
 
 class GroupGuardPendingVerification(Base):
     __tablename__ = f"{file_config.db_prefix}group_guard_pending_verifications"
+    TERMINAL_STATES = frozenset({"passed", "failed", "removed", "cancelled", "external"})
 
     group_id = Column(BigInteger, primary_key=True, autoincrement=False)
     user_id = Column(BigInteger, primary_key=True, autoincrement=False)
@@ -64,6 +65,7 @@ class GroupGuardPendingVerification(Base):
     original_permissions = Column(JSON, nullable=True)
     answer = Column(String(16), nullable=True)
     result = Column(Text, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (

@@ -235,7 +235,7 @@ async def member_left(group_id, user_id, date):
                     ]
                 ),
             )
-            .values(state="cancelled", result="成员已离群，验证取消")
+            .values(**store.verification_outcome("cancelled", "成员已离群，验证取消"))
         )
         tasks = (
             await session.scalars(
@@ -315,7 +315,9 @@ async def membership(update, context):
                         ),
                     )
                     .values(
-                        state="external", result="其他管理员已修改成员权限，验证停止"
+                        **store.verification_outcome(
+                            "external", "其他管理员已修改成员权限，验证停止"
+                        )
                     )
                 )
                 await session.commit()
@@ -358,6 +360,8 @@ async def migrate(old_id, new_id):
         return
     first_id, second_id = sorted((old_id, new_id))
     async with (
+        store.task_lock(first_id).write(),
+        store.task_lock(second_id).write(),
         store.lock(first_id),
         store.lock(second_id),
         engine.new_session() as session,

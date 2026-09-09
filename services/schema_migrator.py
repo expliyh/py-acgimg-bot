@@ -297,7 +297,33 @@ async def _add_guard_task_completion_time(conn: AsyncConnection) -> None:
     )
 
 
+async def _add_guard_verification_completion_time(conn: AsyncConnection) -> None:
+    table = f"{file_config.db_prefix}group_guard_pending_verifications"
+    columns = await conn.run_sync(
+        lambda connection: {
+            column["name"] for column in inspect(connection).get_columns(table)
+        }
+    )
+    if "completed_at" not in columns:
+        await conn.execute(
+            text(f"ALTER TABLE {_quote(table)} ADD COLUMN `completed_at` DATETIME NULL")
+        )
+    # Legacy rows have no trustworthy completion time. Start retention at this
+    # upgrade rather than immediately removing a recently resolved old case.
+    await conn.execute(
+        text(
+            f"UPDATE {_quote(table)} SET `completed_at` = :completed_at "
+            "WHERE `completed_at` IS NULL "
+            "AND `state` IN ('passed', 'failed', 'removed', 'cancelled', 'external')"
+        ),
+        {"completed_at": datetime.now(timezone.utc).replace(tzinfo=None)},
+    )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        6, "Track verification terminal transitions", _add_guard_verification_completion_time
+    ),
     Migration(4, "Add durable moderation policy and verification state", _add_moderation_state),
     Migration(5, "Track moderation task terminal transitions", _add_guard_task_completion_time),
     Migration(

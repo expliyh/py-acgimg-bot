@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from weakref import WeakValueDictionary
 
+from aiorwlock import RWLock
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
+from models import GroupGuardPendingVerification as Pending
 from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
 from services import group_guard
@@ -21,6 +26,43 @@ LEGACY = {
     "keyword_filter_enabled",
 }
 TEMPORARY_RECORD_KINDS = {"message", "join_seen"}
+_task_locks = WeakValueDictionary()
+
+
+class TaskGate:
+    """Tasks may run concurrently; migration exclusively waits for them to finish."""
+
+    def __init__(self):
+        self.lock = RWLock()
+
+    @asynccontextmanager
+    async def read(self):
+        # The context holds self alive while the registry keeps only weak refs.
+        async with self.lock.reader_lock:
+            yield
+
+    @asynccontextmanager
+    async def write(self):
+        async with self.lock.writer_lock:
+            yield
+
+
+def task_lock(group_id: int):
+    """Keep task execution and migration separate from nested operation locks."""
+    key = (id(asyncio.get_running_loop()), group_id)
+    value = _task_locks.get(key)
+    if value is None:
+        value = TaskGate()
+        _task_locks[key] = value
+    return value
+
+
+def verification_outcome(state: str, result: str) -> dict:
+    return {
+        "state": state,
+        "result": result,
+        "completed_at": now() if state in Pending.TERMINAL_STATES else None,
+    }
 
 
 def lock(group_id: int):
