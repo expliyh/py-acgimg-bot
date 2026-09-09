@@ -120,7 +120,11 @@ async def test_external_permissions_retire_all_unresolved_verifications(
     )
     await runtime.membership(
         membership(message, guard_bot, original,
-                   original | {"can_send_photos": True}, actor=1),
+                   original | {"can_send_photos": True}, actor=1,
+                   # Telegram membership updates have second precision. Make
+                   # this synthetic external edit unambiguously follow the
+                   # verification setup even on a slow CI runner.
+                   date=message.date + timedelta(seconds=1)),
         SimpleNamespace(bot=guard_bot),
     )
     async with engine.new_session() as session:
