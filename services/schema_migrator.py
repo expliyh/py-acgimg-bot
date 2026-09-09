@@ -1,13 +1,13 @@
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from configs import config as file_config
-
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +247,85 @@ def _build_comment_clause(comment: str | None) -> str:
     return f" COMMENT '{comment.replace("'", "''")}'"
 
 
+async def _add_moderation_state(conn: AsyncConnection) -> None:
+    additions = {
+        "group_guard_settings": {"policy": "JSON NULL"},
+        "group_guard_pending_verifications": {
+            "state": "VARCHAR(24) NOT NULL DEFAULT 'pending'",
+            "original_permissions": "JSON NULL", "answer": "VARCHAR(16) NULL", "result": "TEXT NULL",
+        },
+    }
+    for suffix, definitions in additions.items():
+        table = f"{file_config.db_prefix}{suffix}"
+        columns = await conn.run_sync(
+            lambda connection, table_name=table: {
+                column["name"]
+                for column in inspect(connection).get_columns(table_name)
+            }
+        )
+        for name, definition in definitions.items():
+            if name not in columns:
+                await conn.execute(
+                    text(
+                        f"ALTER TABLE {_quote(table)} "
+                        f"ADD COLUMN {_quote(name)} {definition}"
+                    )
+                )
+
+
+async def _add_guard_task_completion_time(conn: AsyncConnection) -> None:
+    table = f"{file_config.db_prefix}guard_tasks"
+    columns = await conn.run_sync(
+        lambda connection: {
+            column["name"] for column in inspect(connection).get_columns(table)
+        }
+    )
+    if "completed_at" not in columns:
+        await conn.execute(
+            text(
+                f"ALTER TABLE {_quote(table)} "
+                "ADD COLUMN `completed_at` DATETIME NULL"
+            )
+        )
+    await conn.execute(
+        text(
+            f"UPDATE {_quote(table)} SET `completed_at` = :completed_at "
+            "WHERE `completed_at` IS NULL "
+            "AND `state` IN ('done', 'failed', 'cancelled', 'missed')"
+        ),
+        {"completed_at": datetime.now(timezone.utc).replace(tzinfo=None)},
+    )
+
+
+async def _add_guard_verification_completion_time(conn: AsyncConnection) -> None:
+    table = f"{file_config.db_prefix}group_guard_pending_verifications"
+    columns = await conn.run_sync(
+        lambda connection: {
+            column["name"] for column in inspect(connection).get_columns(table)
+        }
+    )
+    if "completed_at" not in columns:
+        await conn.execute(
+            text(f"ALTER TABLE {_quote(table)} ADD COLUMN `completed_at` DATETIME NULL")
+        )
+    # Legacy rows have no trustworthy completion time. Start retention at this
+    # upgrade rather than immediately removing a recently resolved old case.
+    await conn.execute(
+        text(
+            f"UPDATE {_quote(table)} SET `completed_at` = :completed_at "
+            "WHERE `completed_at` IS NULL "
+            "AND `state` IN ('passed', 'failed', 'removed', 'cancelled', 'external')"
+        ),
+        {"completed_at": datetime.now(timezone.utc).replace(tzinfo=None)},
+    )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        6, "Track verification terminal transitions", _add_guard_verification_completion_time
+    ),
+    Migration(4, "Add durable moderation policy and verification state", _add_moderation_state),
+    Migration(5, "Track moderation task terminal transitions", _add_guard_task_completion_time),
     Migration(
         version=1,
         name="Expand Telegram ID columns to BIGINT",

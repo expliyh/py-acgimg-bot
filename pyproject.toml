@@ -25,6 +25,8 @@ pillow = "12.3.0"
 pixivpy3 = "3.7.5"
 b2sdk = "2.12.0"
 redis = "8.1.0"
+regex = ">=2024.11.6"
+tzdata = ">=2024.1"
 
 [build-system]
 requires = ["poetry-core"]

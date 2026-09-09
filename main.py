@@ -1,5 +1,6 @@
 ﻿import asyncio
 import logging
+import hmac
 
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from utils.logging_config import setup_logging
 from utils import frontend_launcher
 from utils.admin_static import AdminStaticFiles, redirect_to_admin
 from utils.api_contract import ErrorBody, ErrorResponse, error_code, error_message
+from routers import group_guard as guard_routes
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -85,6 +87,11 @@ async def lifespan(app: FastAPI):
             await frontend_launcher.stop_frontend_dev_server()
         except Exception:
             logger.exception("Error while stopping frontend dev server")
+        try:
+            if engine.engine is not None:
+                await engine.engine.dispose()
+        except Exception:
+            logger.exception("Error while disposing database engine")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -120,6 +127,8 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     return JSONResponse(status_code=422, content=payload.model_dump(exclude_none=True))
 
 for router in (
+    guard_routes.router,
+    guard_routes.model_router,
     dashboard.router,
     groups.router,
     private.router,
@@ -152,6 +161,10 @@ async def say_hello(name: str):
 
 @app.post("/tapi/")
 async def telegram_webhook(request: Request):
+    secret = config.telegram_webhook_secret
+    received = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not secret or not hmac.compare_digest(secret, received):
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
     await tg_bot.put_update(request)
 
     return {'ok': True}

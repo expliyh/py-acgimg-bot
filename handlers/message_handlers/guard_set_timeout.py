@@ -39,6 +39,16 @@ async def guard_set_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
 
+    from services.moderation.actions import is_admin
+    try:
+        authorized = not message.sender_chat and await is_admin(context.bot, chat.id, user.id)
+    except TelegramError:
+        authorized = False
+    if not authorized:
+        await active_message_handler_registry.delete(user_id=user.id, group_id=chat.id)
+        await message.reply_text("管理员权限已失效")
+        return
+
     _, _, metadata = handler_key.partition(":")
     try:
         panel_message_id = int(metadata)

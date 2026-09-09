@@ -1,8 +1,20 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text, func, Index
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 
 from configs import config as file_config
+
 from .base import Base
 
 
@@ -15,6 +27,7 @@ class GroupGuardSettings(Base):
     verification_message = Column(Text, nullable=True)
     keyword_filter_enabled = Column(Boolean, nullable=False, default=False)
     kick_on_timeout = Column(Boolean, nullable=False, default=True)
+    policy = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime,
@@ -41,12 +54,18 @@ class GroupGuardKeywordRule(Base):
 
 class GroupGuardPendingVerification(Base):
     __tablename__ = f"{file_config.db_prefix}group_guard_pending_verifications"
+    TERMINAL_STATES = frozenset({"passed", "failed", "removed", "cancelled", "external"})
 
     group_id = Column(BigInteger, primary_key=True, autoincrement=False)
     user_id = Column(BigInteger, primary_key=True, autoincrement=False)
     message_id = Column(BigInteger, nullable=True)
     token = Column(String(32), nullable=False, unique=True)
     expires_at = Column(DateTime, nullable=False)
+    state = Column(String(24), nullable=False, default="pending", server_default="pending")
+    original_permissions = Column(JSON, nullable=True)
+    answer = Column(String(16), nullable=True)
+    result = Column(Text, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (

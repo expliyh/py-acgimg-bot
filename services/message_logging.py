@@ -52,6 +52,11 @@ async def log_message_update(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if message is None or chat is None or user is None:
         return
 
+    # runtime.migrate owns this service event. Logging it under the source chat
+    # after migration would recreate the retired basic-group row and split history.
+    if message.migrate_to_chat_id or message.migrate_from_chat_id:
+        return
+
     parsed = _parse_message(message)
     if parsed is None:
         return

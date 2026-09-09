@@ -5,12 +5,13 @@ import logging
 import random
 import re
 import string
+import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from weakref import WeakValueDictionary
 
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import (
     GroupGuardKeywordRule,
@@ -18,6 +19,7 @@ from models import (
     GroupGuardSettings,
 )
 from registries import engine
+from services.moderation.schemas import VERIFICATION_MESSAGE_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,17 @@ MAX_KEYWORD_PATTERN_LENGTH = 512
 _settings_cache: dict[int, tuple[GuardSettings, datetime]] = {}
 _keyword_cache: dict[int, tuple[list[KeywordRule], datetime]] = {}
 _cache_lock = asyncio.Lock()
+_operation_locks: WeakValueDictionary = WeakValueDictionary()
+
+
+def operation_lock(group_id: int) -> asyncio.Lock:
+    """Serialize all group policy writes, including the legacy settings API."""
+    key = (id(asyncio.get_running_loop()), group_id)
+    value = _operation_locks.get(key)
+    if value is None:
+        value = asyncio.Lock()
+        _operation_locks[key] = value
+    return value
 
 
 async def get_guard_settings(group_id: int) -> GuardSettings:
@@ -74,7 +87,6 @@ async def get_guard_settings(group_id: int) -> GuardSettings:
                 return value
 
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         record = await session.get(GroupGuardSettings, group_id)
         if record is None:
             record = GroupGuardSettings(group_id=group_id)
@@ -103,70 +115,74 @@ async def _invalidate_settings_cache(group_id: int) -> None:
 
 
 async def set_verification_enabled(group_id: int, enabled: bool) -> GuardSettings:
-    async with engine.new_session() as session:
-        session = session  # type: AsyncSession
-        record = await session.get(GroupGuardSettings, group_id)
-        if record is None:
-            record = GroupGuardSettings(group_id=group_id)
-            session.add(record)
-        record.verification_enabled = bool(enabled)
-        await session.commit()
-    await _invalidate_settings_cache(group_id)
+    async with operation_lock(group_id):
+        async with engine.new_session() as session:
+            record = await session.get(GroupGuardSettings, group_id)
+            if record is None:
+                record = GroupGuardSettings(group_id=group_id)
+                session.add(record)
+            record.verification_enabled = bool(enabled)
+            await session.commit()
+        await _invalidate_settings_cache(group_id)
     return await get_guard_settings(group_id)
 
 
 async def set_keyword_filter_enabled(group_id: int, enabled: bool) -> GuardSettings:
-    async with engine.new_session() as session:
-        session = session  # type: AsyncSession
-        record = await session.get(GroupGuardSettings, group_id)
-        if record is None:
-            record = GroupGuardSettings(group_id=group_id)
-            session.add(record)
-        record.keyword_filter_enabled = bool(enabled)
-        await session.commit()
-    await _invalidate_settings_cache(group_id)
-    await _invalidate_keyword_cache(group_id)
+    async with operation_lock(group_id):
+        async with engine.new_session() as session:
+            record = await session.get(GroupGuardSettings, group_id)
+            if record is None:
+                record = GroupGuardSettings(group_id=group_id)
+                session.add(record)
+            record.keyword_filter_enabled = bool(enabled)
+            await session.commit()
+        await _invalidate_settings_cache(group_id)
+        await _invalidate_keyword_cache(group_id)
     return await get_guard_settings(group_id)
 
 
-async def set_verification_timeout(group_id: int, timeout_seconds: int) -> GuardSettings:
+async def set_verification_timeout(
+    group_id: int, timeout_seconds: int
+) -> GuardSettings:
     timeout = max(15, min(timeout_seconds, 3600))
-    async with engine.new_session() as session:
-        session = session  # type: AsyncSession
-        record = await session.get(GroupGuardSettings, group_id)
-        if record is None:
-            record = GroupGuardSettings(group_id=group_id)
-            session.add(record)
-        record.verification_timeout = timeout
-        await session.commit()
-    await _invalidate_settings_cache(group_id)
+    async with operation_lock(group_id):
+        async with engine.new_session() as session:
+            record = await session.get(GroupGuardSettings, group_id)
+            if record is None:
+                record = GroupGuardSettings(group_id=group_id)
+                session.add(record)
+            record.verification_timeout = timeout
+            await session.commit()
+        await _invalidate_settings_cache(group_id)
     return await get_guard_settings(group_id)
 
 
 async def set_verification_message(group_id: int, message: str | None) -> GuardSettings:
     normalized = message.strip() if message else None
-    async with engine.new_session() as session:
-        session = session  # type: AsyncSession
-        record = await session.get(GroupGuardSettings, group_id)
-        if record is None:
-            record = GroupGuardSettings(group_id=group_id)
-            session.add(record)
-        record.verification_message = normalized
-        await session.commit()
-    await _invalidate_settings_cache(group_id)
+    if normalized and len(normalized) > VERIFICATION_MESSAGE_MAX_LENGTH:
+        raise ValueError(f"验证提示不能超过 {VERIFICATION_MESSAGE_MAX_LENGTH} 个字符")
+    async with operation_lock(group_id):
+        async with engine.new_session() as session:
+            record = await session.get(GroupGuardSettings, group_id)
+            if record is None:
+                record = GroupGuardSettings(group_id=group_id)
+                session.add(record)
+            record.verification_message = normalized
+            await session.commit()
+        await _invalidate_settings_cache(group_id)
     return await get_guard_settings(group_id)
 
 
 async def set_kick_on_timeout(group_id: int, enabled: bool) -> GuardSettings:
-    async with engine.new_session() as session:
-        session = session  # type: AsyncSession
-        record = await session.get(GroupGuardSettings, group_id)
-        if record is None:
-            record = GroupGuardSettings(group_id=group_id)
-            session.add(record)
-        record.kick_on_timeout = bool(enabled)
-        await session.commit()
-    await _invalidate_settings_cache(group_id)
+    async with operation_lock(group_id):
+        async with engine.new_session() as session:
+            record = await session.get(GroupGuardSettings, group_id)
+            if record is None:
+                record = GroupGuardSettings(group_id=group_id)
+                session.add(record)
+            record.kick_on_timeout = bool(enabled)
+            await session.commit()
+        await _invalidate_settings_cache(group_id)
     return await get_guard_settings(group_id)
 
 
@@ -179,9 +195,10 @@ async def list_keyword_rules(group_id: int) -> list[KeywordRule]:
                 return list(value)
 
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         result = await session.execute(
-            select(GroupGuardKeywordRule).where(GroupGuardKeywordRule.group_id == group_id)
+            select(GroupGuardKeywordRule).where(
+                GroupGuardKeywordRule.group_id == group_id
+            )
         )
         rules = [
             KeywordRule(
@@ -212,13 +229,17 @@ async def add_keyword_rule(
     case_sensitive: bool = False,
 ) -> KeywordRule:
     raw_pattern = (pattern or "").strip()
-    if not raw_pattern:
+    if not raw_pattern or (
+        not is_regex
+        and not any(
+            unicodedata.category(c) != "Cf" and not c.isspace()
+            for c in unicodedata.normalize("NFKC", raw_pattern)
+        )
+    ):
         raise ValueError("关键字不能为空")
 
     if len(raw_pattern) > MAX_KEYWORD_PATTERN_LENGTH:
-        raise ValueError(
-            f"关键字长度不能超过 {MAX_KEYWORD_PATTERN_LENGTH} 个字符"
-        )
+        raise ValueError(f"关键字长度不能超过 {MAX_KEYWORD_PATTERN_LENGTH} 个字符")
 
     if is_regex:
         flags = 0 if case_sensitive else re.IGNORECASE
@@ -228,7 +249,6 @@ async def add_keyword_rule(
             raise ValueError(f"正则表达式无效: {exc}") from exc
 
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         record = GroupGuardKeywordRule(
             group_id=group_id,
             pattern=raw_pattern,
@@ -251,10 +271,8 @@ async def add_keyword_rule(
 
 async def remove_keyword_rule(group_id: int, rule_id: int) -> bool:
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         result = await session.execute(
-            delete(GroupGuardKeywordRule)
-            .where(
+            delete(GroupGuardKeywordRule).where(
                 (GroupGuardKeywordRule.id == rule_id)
                 & (GroupGuardKeywordRule.group_id == group_id)
             )
@@ -269,9 +287,10 @@ async def remove_keyword_rule(group_id: int, rule_id: int) -> bool:
 
 async def clear_keyword_rules(group_id: int) -> int:
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         result = await session.execute(
-            delete(GroupGuardKeywordRule).where(GroupGuardKeywordRule.group_id == group_id)
+            delete(GroupGuardKeywordRule).where(
+                GroupGuardKeywordRule.group_id == group_id
+            )
         )
         await session.commit()
         removed = result.rowcount or 0
@@ -289,7 +308,6 @@ async def upsert_pending_verification(
 ) -> PendingVerification:
     expires_at = _ensure_timezone(expires_at)
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         record = await session.get(GroupGuardPendingVerification, (group_id, user_id))
         if record is None:
             record = GroupGuardPendingVerification(
@@ -316,9 +334,10 @@ async def upsert_pending_verification(
     )
 
 
-async def get_pending_verification(group_id: int, user_id: int) -> PendingVerification | None:
+async def get_pending_verification(
+    group_id: int, user_id: int
+) -> PendingVerification | None:
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         record = await session.get(GroupGuardPendingVerification, (group_id, user_id))
         if record is None:
             return None
@@ -333,7 +352,6 @@ async def get_pending_verification(group_id: int, user_id: int) -> PendingVerifi
 
 async def get_pending_verification_by_token(token: str) -> PendingVerification | None:
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         result = await session.execute(
             select(GroupGuardPendingVerification).where(
                 GroupGuardPendingVerification.token == token
@@ -353,7 +371,6 @@ async def get_pending_verification_by_token(token: str) -> PendingVerification |
 
 async def delete_pending_verification(group_id: int, user_id: int) -> None:
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         await session.execute(
             delete(GroupGuardPendingVerification).where(
                 (GroupGuardPendingVerification.group_id == group_id)
@@ -366,7 +383,6 @@ async def delete_pending_verification(group_id: int, user_id: int) -> None:
 async def cleanup_expired_pending(now: datetime | None = None) -> int:
     current = _ensure_timezone(now or datetime.now(timezone.utc))
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         result = await session.execute(
             delete(GroupGuardPendingVerification).where(
                 GroupGuardPendingVerification.expires_at <= current
@@ -384,9 +400,10 @@ async def ensure_settings(group_ids: Iterable[int]) -> None:
         return
 
     async with engine.new_session() as session:
-        session = session  # type: AsyncSession
         existing = await session.execute(
-            select(GroupGuardSettings.group_id).where(GroupGuardSettings.group_id.in_(ids))
+            select(GroupGuardSettings.group_id).where(
+                GroupGuardSettings.group_id.in_(ids)
+            )
         )
         existing_ids = set(existing.scalars().all())
         missing = [gid for gid in ids if gid not in existing_ids]
@@ -405,4 +422,3 @@ def _ensure_timezone(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
-

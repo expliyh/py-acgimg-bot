@@ -44,7 +44,7 @@ jobs:
           }
 
           run_tests unit tests/unit
-          run_tests service tests/test_*.py
+          run_tests service tests/test_*.py tests/moderation
           run_tests system tests/system
           run_tests e2e tests/e2e
 

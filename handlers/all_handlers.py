@@ -11,7 +11,5 @@ incoming_message_handler = MessageHandler(filters.ALL, handle_incoming_message, 
 all_handlers: list[BaseHandler] = [
     *all_command_handlers,
     CallbackQueryHandler(callback_handler_func),
-    # new_member_verification_handler,
-    # keyword_filter_handler,
     incoming_message_handler,
 ]

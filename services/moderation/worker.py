@@ -1,0 +1,587 @@
+"""Database-backed schedules, with at-most-once dispatch for ambiguous sends."""
+
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import delete, select, update
+from telegram.error import RetryAfter
+
+from models import GroupGuardPendingVerification as Pending
+from models import GuardEvent, GuardRecord, GuardTask
+from registries import engine
+
+from . import actions, ai, store, verification
+from .schemas import ActionRequest, Content
+
+logger = logging.getLogger(__name__)
+TERMINAL_TASK_STATES = {"done", "failed", "cancelled", "missed"}
+
+
+def next_occurrence(due, repeat, timezone_name, clock=None):
+    clock = clock or store.now()
+    local = due.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(timezone_name))
+    step = timedelta(days=7 if repeat == "weekly" else 1)
+    while True:
+        local += step
+        candidate = local.astimezone(timezone.utc).replace(tzinfo=None)
+        if candidate > clock:
+            return candidate
+
+
+async def save_content(group_id, value: Content):
+    async with store.lock(group_id):
+        record = await store.put_record(
+            group_id,
+            value.kind,
+            value.name,
+            value.model_dump(mode="json"),
+            value.enabled,
+        )
+        if value.kind == "announcement":
+            async with engine.new_session() as session:
+                jobs = (
+                    await session.scalars(
+                        select(GuardTask).where(
+                            GuardTask.group_id == group_id,
+                            GuardTask.kind == "announcement",
+                            GuardTask.state == "pending",
+                        )
+                    )
+                ).all()
+                for job in jobs:
+                    if job.data.get("name") == value.name:
+                        job.state = "cancelled"
+                        job.completed_at = store.now()
+                await session.commit()
+            if value.enabled:
+                await store.task(
+                    group_id,
+                    "announcement",
+                    value.due_at,
+                    {"name": value.name, "revision": record["data"]},
+                )
+        return record
+
+
+async def delete_content(group_id: int, kind: str, name: str) -> bool:
+    async with store.lock(group_id), engine.new_session() as session:
+        result = await session.execute(
+            delete(GuardRecord).where(
+                GuardRecord.group_id == group_id,
+                GuardRecord.kind == kind,
+                GuardRecord.key == name,
+            )
+        )
+        if kind == "announcement":
+            jobs = (
+                await session.scalars(
+                    select(GuardTask).where(
+                        GuardTask.group_id == group_id,
+                        GuardTask.kind == "announcement",
+                        GuardTask.state == "pending",
+                    )
+                )
+            ).all()
+            for job in jobs:
+                if job.data.get("name") == name:
+                    job.state = "cancelled"
+                    job.result = "公告已删除，任务取消"
+                    job.completed_at = store.now()
+        await session.commit()
+        return bool(result.rowcount)
+
+
+async def set_state(job_id, state, result=""):
+    values = {
+        "state": state,
+        "result": result[:2000],
+        "completed_at": store.now() if state in TERMINAL_TASK_STATES else None,
+    }
+    async with engine.new_session() as session:
+        await session.execute(
+            update(GuardTask).where(GuardTask.id == job_id).values(**values)
+        )
+        await session.commit()
+
+
+class Worker:
+    def __init__(self, bot):
+        self.bot, self.runner = bot, None
+        self.children = set()
+        self.last_cleanup = None
+
+    async def start(self):
+        if not self.runner:
+            await self.recover()
+            self.runner = asyncio.create_task(self.run())
+
+    async def stop(self):
+        if self.runner:
+            self.runner.cancel()
+        for child in self.children:
+            child.cancel()
+        await asyncio.gather(
+            *([self.runner] if self.runner else []),
+            *self.children,
+            return_exceptions=True,
+        )
+        self.runner = None
+
+    async def recover(self):
+        async with engine.new_session() as session:
+            interrupted_ai = (
+                await session.scalars(
+                    select(GuardTask).where(
+                        GuardTask.kind == "ai", GuardTask.state == "running"
+                    )
+                )
+            ).all()
+            # Older workers did not persist a phase, so absence is not proof that
+            # Telegram-side punishment had not begun.
+            retryable_ai = [
+                task for task in interrupted_ai if task.result == "classifying"
+            ]
+            for task in retryable_ai:
+                message = task.data.get("message") or {}
+                message_id = message.get("message_id")
+                version = task.data.get("version")
+                if message_id is not None and version:
+                    await session.execute(
+                        delete(GuardEvent).where(
+                            GuardEvent.group_id == task.group_id,
+                            GuardEvent.action.in_(["ai", "image_grade"]),
+                            GuardEvent.incident == f"ai:{message_id}:{version}",
+                            GuardEvent.status == "running",
+                        )
+                    )
+                task.state = "pending"
+                task.result = "分类阶段被中断，已重新排队"
+                task.completed_at = None
+            interrupted_announcements = [
+                store.dump(row)
+                for row in (
+                    await session.scalars(
+                        select(GuardTask).where(
+                            GuardTask.kind == "announcement",
+                            GuardTask.state == "running",
+                        )
+                    )
+                ).all()
+            ]
+            await session.execute(
+                update(GuardTask)
+                .where(GuardTask.state == "running")
+                .values(
+                    state="uncertain",
+                    result="进程中断，结果需核查",
+                    completed_at=None,
+                )
+            )
+            await session.execute(
+                update(GuardEvent)
+                .where(GuardEvent.status == "running")
+                .values(status="uncertain")
+            )
+            await session.execute(
+                update(Pending)
+                .where(Pending.state.in_(["preparing", "processing"]))
+                .values(state="uncertain", result="处理被中断，请管理员核查权限")
+            )
+            values = [
+                store.dump(row)
+                for row in (
+                    await session.scalars(
+                        select(Pending).where(Pending.state == "pending")
+                    )
+                ).all()
+            ]
+            restrictions = [
+                store.dump(row)
+                for row in (
+                    await session.scalars(
+                        select(GuardRecord).where(GuardRecord.kind == "restriction")
+                    )
+                ).all()
+            ]
+            review_rows = (
+                await session.scalars(
+                    select(GuardRecord).where(GuardRecord.kind == "review")
+                )
+            ).all()
+            for review in review_rows:
+                if review.data.get("state") == "processing":
+                    review.data = review.data | {
+                        "state": "uncertain",
+                        "reason": "处理被中断，请核查实际结果",
+                    }
+            tasks = (
+                await session.scalars(
+                    select(GuardTask)
+                    .where(
+                        GuardTask.kind.in_(["verify", "unmute"]),
+                        GuardTask.state == "pending",
+                    )
+                    .order_by(GuardTask.created_at, GuardTask.id)
+                )
+            ).all()
+            pending_announcements = (
+                await session.scalars(
+                    select(GuardTask).where(
+                        GuardTask.kind == "announcement",
+                        GuardTask.state == "pending",
+                    )
+                )
+            ).all()
+
+            def identity(group_id, kind, data):
+                return (
+                    group_id,
+                    kind,
+                    data.get("user_id"),
+                    data.get("token" if kind == "verify" else "event_id"),
+                )
+
+            pending_tasks = {}
+            for task in tasks:
+                key = identity(task.group_id, task.kind, task.data)
+                pending_tasks.setdefault(key, []).append(task)
+
+            def restore_timeout(group_id, kind, due_at, data):
+                if due_at.tzinfo:
+                    due_at = due_at.astimezone(timezone.utc).replace(tzinfo=None)
+                key = identity(group_id, kind, data)
+                existing = pending_tasks.get(key, [])
+                if existing:
+                    # Keep the original task and reconcile its authoritative deadline.
+                    existing[0].due_at = (
+                        max(due_at, existing[0].due_at)
+                        if existing[0].data.get("retry_attempt")
+                        else due_at
+                    )
+                    for duplicate in existing[1:]:
+                        duplicate.state = "cancelled"
+                        duplicate.result = "恢复时合并重复的到期任务"
+                        duplicate.completed_at = store.now()
+                else:
+                    task = GuardTask(
+                        id=store.uid(),
+                        group_id=group_id,
+                        kind=kind,
+                        due_at=due_at,
+                        data=data,
+                        state="pending",
+                        created_at=store.now(),
+                    )
+                    session.add(task)
+                    pending_tasks[key] = [task]
+
+            for row in values:
+                restore_timeout(
+                    row["group_id"],
+                    "verify",
+                    row["expires_at"],
+                    {"user_id": row["user_id"], "token": row["token"]},
+                )
+            for row in restrictions:
+                if row["data"].get("deadline") and row["data"].get("state") in {
+                    "active",
+                    "applying",
+                }:
+                    restore_timeout(
+                        row["group_id"],
+                        "unmute",
+                        datetime.fromisoformat(row["data"]["deadline"]),
+                        {
+                            "user_id": int(row["key"]),
+                            "event_id": row["data"]["event_id"],
+                        },
+                    )
+            for job in interrupted_announcements:
+                record = await session.scalar(
+                    select(GuardRecord).where(
+                        GuardRecord.group_id == job["group_id"],
+                        GuardRecord.kind == "announcement",
+                        GuardRecord.key == job["data"].get("name"),
+                    )
+                )
+                if (
+                    not record
+                    or not record.enabled
+                    or record.data != job["data"].get("revision")
+                ):
+                    continue
+                try:
+                    value = Content.model_validate(record.data)
+                except ValueError:
+                    continue
+                if value.repeat == "once" or any(
+                    task.group_id == job["group_id"] and task.data == job["data"]
+                    for task in pending_announcements
+                ):
+                    continue
+                successor = GuardTask(
+                    id=store.uid(),
+                    group_id=job["group_id"],
+                    kind="announcement",
+                    due_at=next_occurrence(job["due_at"], value.repeat, value.timezone),
+                    data=job["data"],
+                    state="pending",
+                    created_at=store.now(),
+                )
+                session.add(successor)
+                pending_announcements.append(successor)
+            await session.commit()
+
+    async def run(self):
+        while True:
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Moderation worker tick failed")
+            await asyncio.sleep(1)
+
+    async def tick(self):
+        config = await store.ai_config()
+        async with engine.new_session() as session:
+            due = (
+                await session.scalars(
+                    select(GuardTask)
+                    .where(
+                        GuardTask.state == "pending",
+                        GuardTask.kind != "ai",
+                        GuardTask.due_at <= store.now(),
+                    )
+                    .order_by(GuardTask.due_at)
+                    .limit(20)
+                )
+            ).all()
+            ai_jobs = (
+                await session.scalars(
+                    select(GuardTask)
+                    .where(
+                        GuardTask.state == "pending",
+                        GuardTask.kind == "ai",
+                        GuardTask.due_at <= store.now(),
+                    )
+                    .order_by(GuardTask.due_at)
+                    .limit(max(0, config.concurrency - len(self.children)))
+                )
+            ).all()
+            jobs = [store.dump(job) for job in [*due, *ai_jobs]]
+        for job in jobs:
+            async with engine.new_session() as session:
+                result = await session.execute(
+                    update(GuardTask)
+                    .where(GuardTask.id == job["id"], GuardTask.state == "pending")
+                    .values(
+                        state="running",
+                        result="classifying" if job["kind"] == "ai" else None,
+                        completed_at=None,
+                    )
+                )
+                await session.commit()
+                if not result.rowcount:
+                    continue
+            if job["kind"] == "ai":
+                child = asyncio.create_task(self.dispatch(job))
+                self.children.add(child)
+                child.add_done_callback(self.children.discard)
+            else:
+                await self.dispatch(job)
+        if self.last_cleanup is None or self.last_cleanup < store.now() - timedelta(
+            hours=1
+        ):
+            await self.cleanup()
+            self.last_cleanup = store.now()
+
+    async def dispatch(self, job):
+        # A queued snapshot may predate migration. Reload while holding the same
+        # group lease as migration, and follow a moved row before doing any work.
+        while True:
+            group_id = job["group_id"]
+            async with store.task_lock(group_id).read():
+                async with engine.new_session() as session:
+                    row = await session.get(GuardTask, job["id"])
+                    if not row or row.state not in {"pending", "running"}:
+                        return
+                    job = store.dump(row)
+                if job["group_id"] != group_id:
+                    continue
+                await self._dispatch(job)
+                return
+
+    async def _dispatch(self, job):
+        data, group_id, kind = job["data"], job["group_id"], job["kind"]
+        try:
+            result = "success"
+            if kind == "ai":
+                result = await ai.process(self.bot, job)
+            elif kind == "verify":
+                result = await verification.finish(
+                    self.bot, group_id, data["user_id"], data["token"], expired=True
+                )
+            elif kind == "delete":
+                await actions.require_right(self.bot, group_id, "can_delete_messages")
+                await self.bot.delete_message(group_id, data["message_id"])
+            elif kind == "unmute":
+                record = await store.record(
+                    group_id, "restriction", str(data["user_id"])
+                )
+                if record and record["data"]["event_id"] == data["event_id"]:
+                    # Recovery can rebuild a task, so retain the restriction's
+                    # receipt key. Only a confirmed rate limit permits a new attempt.
+                    request_id = f"expire:{data['event_id']}"
+                    if data.get("retry_attempt"):
+                        request_id += f":retry:{data['retry_attempt']}"
+                    result = await actions.execute(
+                        self.bot,
+                        group_id,
+                        ActionRequest(
+                            action="unmute",
+                            user_id=data["user_id"],
+                            request_id=request_id,
+                        ),
+                        source="scheduler",
+                        expected_restriction_id=data["event_id"],
+                    )
+                    if result["status"] != "success":
+                        if result["status"] == "failed" and "retry_after" in result["data"]:
+                            await self.retry_unmute(job, result["data"]["retry_after"])
+                            return
+                        await set_state(
+                            job["id"], result["status"], str(result["data"])
+                        )
+                        return
+                    result = "禁言已到期解除"
+            elif kind == "announcement":
+                await self.announce(job)
+                return
+            await set_state(job["id"], "done", str(result))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if kind == "unmute" and isinstance(exc, RetryAfter):
+                await self.retry_unmute(job, exc.retry_after)
+                return
+            logger.exception("Moderation task %s failed", job["id"])
+            task_status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
+            await set_state(
+                job["id"],
+                task_status,
+                type(exc).__name__,
+            )
+            await store.event(
+                group_id,
+                "task",
+                status=task_status,
+                reason=type(exc).__name__,
+                data={"task_id": job["id"], "kind": kind},
+            )
+
+    async def retry_unmute(self, job, delay):
+        if isinstance(delay, timedelta):
+            delay = delay.total_seconds()
+        async with engine.new_session() as session:
+            await session.execute(
+                update(GuardTask)
+                .where(GuardTask.id == job["id"])
+                .values(
+                    state="pending",
+                    due_at=store.now() + timedelta(seconds=max(1, delay)),
+                    data=job["data"] | {
+                        "retry_attempt": job["data"].get("retry_attempt", 0) + 1
+                    },
+                    result="Telegram 限流，等待后重试解禁",
+                    completed_at=None,
+                )
+            )
+            await session.commit()
+
+    async def announce(self, job):
+        group_id, data = job["group_id"], job["data"]
+        async with store.lock(group_id):
+            record = await store.record(group_id, "announcement", data["name"])
+            if (
+                not record
+                or not record["enabled"]
+                or record["data"] != data["revision"]
+            ):
+                await set_state(job["id"], "cancelled")
+                return
+            value = Content.model_validate(record["data"])
+            late = store.now() - job["due_at"] > timedelta(minutes=5)
+            if value.repeat != "once":
+                await store.task(
+                    group_id,
+                    "announcement",
+                    next_occurrence(job["due_at"], value.repeat, value.timezone),
+                    data,
+                )
+            if not late:
+                await self.bot.send_message(group_id, value.text)
+            await set_state(job["id"], "missed" if late else "done")
+
+    async def cleanup(self):
+        async with engine.new_session() as session:
+            # Temporary records exist even in groups with no moderation events.
+            await session.execute(
+                delete(GuardRecord).where(
+                    GuardRecord.kind.in_(store.TEMPORARY_RECORD_KINDS),
+                    GuardRecord.created_at < store.now() - timedelta(days=2),
+                )
+            )
+            groups = (
+                await session.scalars(
+                    select(GuardEvent.group_id).union(
+                        select(Pending.group_id),
+                        select(GuardTask.group_id),
+                        select(GuardRecord.group_id).where(
+                            GuardRecord.kind == "review"
+                        ),
+                    )
+                )
+            ).all()
+            await session.commit()
+        for group_id in groups:
+            settings = await store.policy(group_id)
+            review_cutoff = store.now() - timedelta(days=settings.log_days)
+            cutoff = store.now() - timedelta(
+                days=max(settings.log_days, settings.warning_days)
+            )
+            async with engine.new_session() as session:
+                await session.execute(
+                    delete(Pending).where(
+                        Pending.group_id == group_id,
+                        Pending.state.in_(Pending.TERMINAL_STATES),
+                        Pending.completed_at < review_cutoff,
+                    )
+                )
+                expired_reviews = (
+                    await session.scalars(
+                        select(GuardRecord).where(
+                            GuardRecord.group_id == group_id,
+                            GuardRecord.kind == "review",
+                            GuardRecord.created_at < review_cutoff,
+                        )
+                    )
+                ).all()
+                for review in expired_reviews:
+                    if review.data.get("state") in {"resolved", "failed"}:
+                        await session.delete(review)
+                await session.execute(
+                    delete(GuardEvent).where(
+                        GuardEvent.group_id == group_id, GuardEvent.created_at < cutoff
+                    )
+                )
+                await session.execute(
+                    delete(GuardTask).where(
+                        GuardTask.group_id == group_id,
+                        GuardTask.state.in_(["done", "failed", "cancelled", "missed"]),
+                        GuardTask.completed_at < cutoff,
+                    )
+                )
+                await session.commit()

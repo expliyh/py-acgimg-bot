@@ -38,14 +38,14 @@ class Engine:
         if config_file.db_type == 'sqlite':
             self.engine = create_async_engine(
                 url,
-                echo=True,
-                echo_pool=True,
+                echo=False,
+                echo_pool=False,
             )
         else:
             self.engine = create_async_engine(
                 url,
-                echo=True,
-                echo_pool=True,
+                echo=False,
+                echo_pool=False,
                 pool_recycle=3600
             )
 

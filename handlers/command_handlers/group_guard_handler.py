@@ -1,15 +1,15 @@
 ﻿from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from handlers.registry import bot_handler
-from registries import group_registry
 from services import group_guard
 from services.command_history import command_logger
-from services.telegram_cache import get_cached_admin_ids
+from services.moderation.actions import is_admin
 from utils import is_group_type
 
 
@@ -19,13 +19,12 @@ async def _ensure_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     if chat is None or user is None:
         return False
 
-    group = await group_registry.get_group_by_id(chat.id)
-    admin_ids: set[int] = set(group.admin_ids or [])
-    if not admin_ids:
-        fetched = await get_cached_admin_ids(context, chat.id)
-        if fetched:
-            admin_ids.update(fetched)
-    return bool(admin_ids and user.id in admin_ids)
+    if update.effective_message and update.effective_message.sender_chat:
+        return False
+    try:
+        return await is_admin(context.bot, chat.id, user.id)
+    except TelegramError:
+        return False
 
 
 def _format_settings_text(
@@ -97,6 +96,9 @@ async def group_guard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     args = context.args or []
+    from .moderation_handler import guard_extra
+    if await guard_extra(update, context):
+        return
     settings = await group_guard.get_guard_settings(chat.id)
 
     if not args:
@@ -162,7 +164,11 @@ async def _handle_verify_command(
             await message.reply_text("请提供验证提示内容")
             return
         custom_message = " ".join(args[1:])
-        updated = await group_guard.set_verification_message(chat.id, custom_message)
+        try:
+            updated = await group_guard.set_verification_message(chat.id, custom_message)
+        except ValueError as exc:
+            await message.reply_text(str(exc))
+            return
         summary = updated.verification_message or "使用默认提示"
         await message.reply_text(f"验证提示已更新: {summary}")
         return
