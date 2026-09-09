@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
+import { listAllGroups, type GroupListItem } from "@/services/api";
 import {
   guardApi,
   type GuardPolicy,
@@ -26,11 +27,41 @@ import {
 import { shouldRetainActionRequest } from "@/utils/guard-action";
 
 const route = useRoute();
-const groupId = ref(Number(route.params.id) || 0);
-const inputGroupId = ref(groupId.value);
+const router = useRouter();
+function parseRouteGroupId(value: unknown): number {
+  if (typeof value !== "string") return 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed < 0 ? parsed : 0;
+}
+const initialGroupId = parseRouteGroupId(route.params.id);
+const groupId = ref(initialGroupId);
+const selectedGroupId = ref<number | null>(initialGroupId || null);
+const knownGroups = ref<GroupListItem[]>([]);
+const groupsLoading = ref(false);
+interface GroupOption {
+  id: number;
+  title: string;
+}
+const groupOptions = computed<GroupOption[]>(() => {
+  const options = knownGroups.value.map((group) => ({
+    id: group.id,
+    title: `${group.name || "未命名群组"}（${group.id}）`,
+  }));
+  if (
+    selectedGroupId.value !== null &&
+    !options.some((option) => option.id === selectedGroupId.value)
+  ) {
+    options.unshift({
+      id: selectedGroupId.value,
+      title: `当前链接群组（${selectedGroupId.value}）`,
+    });
+  }
+  return options;
+});
 const loading = ref(false),
   busy = ref(false),
   error = ref(""),
+  groupListError = ref(""),
   success = ref(""),
   tab = ref("overview");
 const policy = ref<GuardPolicy | null>(null);
@@ -264,12 +295,12 @@ async function run(fn: () => Promise<unknown>, message = "已保存") {
 }
 let loadVersion = 0;
 async function load() {
-  if (!Number.isSafeInteger(inputGroupId.value) || inputGroupId.value >= 0) {
-    error.value = "请输入有效的负数群 ID";
+  const id = selectedGroupId.value;
+  if (id === null || !Number.isSafeInteger(id) || id >= 0) {
+    error.value = "请选择有效的群组";
     return;
   }
-  const version = ++loadVersion,
-    id = inputGroupId.value;
+  const version = ++loadVersion;
   loading.value = true;
   error.value = "";
   success.value = "";
@@ -317,6 +348,25 @@ async function load() {
     if (version === loadVersion) error.value = detailError(e);
   } finally {
     if (version === loadVersion) loading.value = false;
+  }
+}
+async function loadKnownGroups() {
+  groupsLoading.value = true;
+  groupListError.value = "";
+  try {
+    knownGroups.value = await listAllGroups();
+  } catch (e) {
+    groupListError.value = detailError(e);
+  } finally {
+    groupsLoading.value = false;
+  }
+}
+function selectGroup(value: number | null) {
+  selectedGroupId.value = value;
+  if (value === null) {
+    void router.push({ name: "guard" });
+  } else if (parseRouteGroupId(route.params.id) !== value) {
+    void router.push({ name: "group-guard", params: { id: String(value) } });
   }
 }
 async function savePolicy() {
@@ -436,16 +486,19 @@ watch(taskPage, (p) => {
       tasks.value = await guardApi.tasks(groupId.value, p);
     }, "");
 });
-onMounted(() => {
+onMounted(async () => {
+  await loadKnownGroups();
   if (groupId.value) void load();
 });
 watch(
   () => route.params.id,
   (id) => {
-    inputGroupId.value = Number(id) || 0;
-    if (inputGroupId.value) void load();
+    const parsed = parseRouteGroupId(id);
+    selectedGroupId.value = parsed || null;
+    if (parsed) void load();
     else {
       ++loadVersion;
+      groupId.value = 0;
       policy.value = null;
     }
   },
@@ -462,20 +515,34 @@ watch(
     </div>
     <VCard
       ><VCardText class="d-flex ga-3 align-center flex-wrap"
-        ><VTextField
-          v-model.number="inputGroupId"
-          label="Telegram 群 ID"
-          placeholder="-100…"
+        ><VAutocomplete
+          id="guard-group-select"
+          :model-value="selectedGroupId"
+          :items="groupOptions"
+          item-title="title"
+          item-value="id"
+          label="选择已知群组"
+          placeholder="按名称或群 ID 搜索"
+          clearable
           hide-details
-          type="number"
+          :loading="groupsLoading"
           :disabled="busy || loading"
-        /><VBtn :loading="loading" :disabled="busy" @click="load">加载群组</VBtn
-        ><VChip v-if="policy">当前群：{{ groupId }}</VChip></VCardText
+          @update:model-value="selectGroup"
+        /><VChip v-if="policy" color="primary"
+          >当前群：{{ groupOptions.find((item) => item.id === groupId)?.title || groupId }}</VChip
+        ></VCardText
       ></VCard
     >
     <VAlert v-if="error" type="error" closable @click:close="error = ''">{{
       error
     }}</VAlert>
+    <VAlert
+      v-if="groupListError"
+      type="error"
+      closable
+      @click:close="groupListError = ''"
+      >无法加载已知群组：{{ groupListError }}</VAlert
+    >
     <VAlert
       v-if="success"
       type="success"
