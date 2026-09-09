@@ -12,4 +12,10 @@ body { background: rgb(var(--v-theme-background)); }
   border: 1px solid color-mix(in srgb, rgb(var(--v-theme-primary)) 35%, transparent);
   color: rgb(var(--v-theme-on-surface));
 }
-.selected-task-row { background: rgb(var(--v-theme-surface-variant)); }
+.selected-task-row {
+  background-color: color-mix(
+    in srgb,
+    rgb(var(--v-theme-primary)) 8%,
+    rgb(var(--v-theme-surface))
+  );
+}
