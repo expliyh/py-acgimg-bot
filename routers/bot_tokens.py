@@ -65,6 +65,10 @@ async def set_bot_token(payload: BotTokenPayload) -> BotTokenResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        await bot.tg_bot.config()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Bot token saved but failed to reload Telegram bot") from exc
     return _to_response(current)
 
 
@@ -74,6 +78,10 @@ async def set_bot_token_enabled(payload: BotTokenStatusPayload) -> BotTokenRespo
         await config_registry.set_bot_token_enabled(payload.enabled)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    try:
+        await bot.tg_bot.config()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Bot status updated but failed to reload Telegram bot") from exc
     current = await config_registry.get_bot_token()
     return _to_response(current)
 
@@ -81,6 +89,10 @@ async def set_bot_token_enabled(payload: BotTokenStatusPayload) -> BotTokenRespo
 @router.delete("", response_model=BotTokenResponse)
 async def delete_bot_token() -> BotTokenResponse:
     await config_registry.delete_bot_token()
+    try:
+        await bot.tg_bot.config()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Bot token deleted but failed to stop Telegram bot") from exc
     return _to_response(None)
 
 

@@ -260,6 +260,16 @@ async def membership(update, context):
         return
     if change.chat.type not in {"group", "supergroup"}:
         return
+    # Telegram sends my_chat_member when the bot is added, before any group
+    # message exists. Persist the chat immediately so the admin console can
+    # show it without waiting for user activity.
+    async with engine.new_session() as session:
+        group = await session.get(Group, change.chat.id)
+        if group is None:
+            session.add(Group(id=change.chat.id, name=change.chat.title))
+        elif change.chat.title and group.name != change.chat.title:
+            group.name = change.chat.title
+        await session.commit()
     await invalidate_chat_admins(change.chat.id)
 
     def present(member):
