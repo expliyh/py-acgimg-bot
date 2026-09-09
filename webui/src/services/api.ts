@@ -314,6 +314,19 @@ export async function listGroups(params: GroupListQuery): Promise<GroupListRespo
   return data;
 }
 
+export async function listAllGroups(pageSize = 100): Promise<GroupListItem[]> {
+  return collectAllPages(
+    (page, size) =>
+      listGroups({
+        page,
+        page_size: size,
+        sort_by: 'id',
+        sort_order: 'asc',
+      }),
+    pageSize,
+  );
+}
+
 export async function getGroupDetail(id: number): Promise<GroupDetail> {
   const { data } = await client.get<GroupDetail>(`/groups/${id}`);
   return data;
