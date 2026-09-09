@@ -61,10 +61,14 @@ async def restore_permissions(bot, group_id: int, user_id: int, snapshot: dict, 
     clock = store.now().replace(tzinfo=timezone.utc)
     if until and until.timestamp() > 0 and until <= clock:
         prior, until = None, None
+    # ``to_dict`` may contain fields from an older Bot API (or unknown fields
+    # forwarded by Telegram).  ChatPermissions is strict in current PTB, so
+    # construct only parameters supported by this installed SDK.
+    supported = set(ChatPermissions.__slots__)
     values = {
         k: bool(v) and (prior is None or prior.get(k, False))
         for k, v in defaults.items()
-        if k.startswith("can_")
+        if k in supported
     }
     deferred = bool(until and 0 < (until - clock).total_seconds() <= 60)
     if deferred:
