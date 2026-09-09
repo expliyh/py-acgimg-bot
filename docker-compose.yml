@@ -1,23 +1,20 @@
 services:
-  storage-permissions:
-    image: ghcr.io/expliyh/py-acgimg-bot:main
-    user: root
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["mkdir -p /app/storage && chown -R app:app /app/storage"]
-    volumes:
-      - ./storage:/app/storage
-
   app:
-    image: ghcr.io/expliyh/py-acgimg-bot:main
-    restart: unless-stopped
-    depends_on:
-      storage-permissions:
-        condition: service_completed_successfully
+    build:
+      context: .
+    image: py-acgimg-bot:latest
     environment:
-      DATABASE_TYPE: sqlite
-      SQLITE_PATH: /app/storage/acgimg.db
+      DATABASE_HOST: mariadb
+      DATABASE_PORT: 3306
+      DATABASE_NAME: acgimg
+      DATABASE_USERNAME: acgimg
+      DATABASE_PASSWORD: change_me
+      DATABASE_PREFIX: acgimg
       TZ: Asia/Shanghai
     ports:
       - "8000:8000"
     volumes:
-      - ./storage:/app/storage
+      - storage:/app/storage
+
+volumes:
+  storage:
