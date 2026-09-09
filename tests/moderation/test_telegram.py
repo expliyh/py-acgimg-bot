@@ -284,7 +284,9 @@ async def test_verification_cannot_be_completed_by_another_member(
         assert (await session.get(Pending, (guard_group, 2))).state == "pending"
 
 
-async def test_failed_verification_restore_never_reports_passed(guard_group, guard_bot):
+async def test_definitive_verification_restore_failure_is_failed(
+    guard_group, guard_bot
+):
     await verification.start(
         guard_bot, guard_group, User(2, "New", False), "Group", Policy()
     )
@@ -294,7 +296,7 @@ async def test_failed_verification_restore_never_reports_passed(guard_group, gua
     result = await verification.finish(guard_bot, guard_group, 2, token)
     assert "验证通过" not in result
     async with engine.new_session() as session:
-        assert (await session.get(Pending, (guard_group, 2))).state == "uncertain"
+        assert (await session.get(Pending, (guard_group, 2))).state == "failed"
 
 
 async def test_repeated_join_does_not_replace_unresolved_verification(

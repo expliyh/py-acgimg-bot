@@ -301,6 +301,8 @@ async function load() {
       tasks.value,
     ] = values;
     policySnapshot.value = cloneGuardPolicy(policy.value!);
+    // New scheduled announcements should follow the group's configured zone.
+    contentForm.timezone = policy.value!.timezone;
     rules.value = values[1].items;
     legacy.value = values[1].legacy;
     reviewPage.value = 1;

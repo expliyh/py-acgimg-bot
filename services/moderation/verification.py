@@ -212,9 +212,11 @@ async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
                         verification_token=token
                     )
         except (TelegramError, ValueError) as exc:
-            status, text = (
-                "uncertain",
-                f"操作未完成，请联系管理员（{type(exc).__name__}）",
+            status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
+            text = (
+                f"操作未完成，请联系管理员（{type(exc).__name__}）"
+                if status == "uncertain"
+                else f"操作失败（{type(exc).__name__}）"
             )
         async with engine.new_session() as session:
             await session.execute(
