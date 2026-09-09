@@ -13,6 +13,7 @@ from telegram.ext import ContextTypes
 from defines import MessageType
 from models import Group, GroupChatHistory, PrivateChatHistory, User
 from registries import engine
+from registries.user_registry import normalize_username
 from services.telegram_cache import get_cached_admin_ids
 from utils import is_group_type
 
@@ -174,6 +175,11 @@ async def _store_private_message(
 
 def _sync_user_profile(db_user: User, tg_user: TgUser) -> None:
     """Ensure the stored user profile mirrors the latest Telegram data."""
+
+    username = normalize_username(tg_user.username)
+    if username != db_user.username:
+        logger.debug("Updating username for user_id=%s to %r", db_user.id, username)
+        db_user.username = username
 
     nickname = _extract_user_display_name(tg_user)
     if nickname != db_user.nick_name:

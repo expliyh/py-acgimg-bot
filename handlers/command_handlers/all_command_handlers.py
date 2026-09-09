@@ -12,6 +12,7 @@ from . import (
     option_handler,
     p_info_handler,
     setu_handler,
+    verification_handler,
 )
 
 

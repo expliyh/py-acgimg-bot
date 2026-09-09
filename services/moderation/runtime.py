@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 
 from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy import update as sql_update
@@ -18,10 +19,12 @@ from models import (
     GuardRecord,
     GuardTask,
 )
-from registries import engine
+from registries import engine, user_registry
 from services.telegram_cache import get_cached_admin_ids, invalidate_chat_admins
 
 from . import actions, ai, rules, store, verification
+
+logger = logging.getLogger(__name__)
 
 
 async def remember_message(group_id: int, message):
@@ -179,6 +182,10 @@ async def preprocess(update, context):
 async def member_joined(bot, chat, user, date):
     # Service messages and chat_member updates describe the same transition.
     async with store.lock(chat.id):
+        try:
+            await user_registry.sync_telegram_user(user.id, user.username)
+        except Exception:  # noqa: BLE001 - indexing must not block join moderation
+            logger.exception("Failed to persist username for joined user %s", user.id)
         old = await store.record(chat.id, "join_seen", str(user.id))
         timestamp = date.timestamp()
         if old and abs(old["data"]["timestamp"] - timestamp) < 10:

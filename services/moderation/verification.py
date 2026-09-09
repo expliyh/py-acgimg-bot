@@ -1,5 +1,7 @@
+import logging
 import secrets
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
@@ -10,6 +12,19 @@ from models import GroupGuardPendingVerification as Pending
 from registries import engine
 
 from . import actions, reviews, rules, store
+
+logger = logging.getLogger(__name__)
+
+_RETRIGGERABLE_STATES = frozenset({"pending", "restricted"})
+_UNSAFE_RETRIGGER_STATES = frozenset({"preparing", "processing", "uncertain"})
+
+
+@dataclass(frozen=True, slots=True)
+class RetriggerResult:
+    state: str
+    token: str | None
+    replaced: bool
+    reason: str | None = None
 
 
 def greeting(template, user, chat, timeout=60):
@@ -31,11 +46,20 @@ async def _verification_lock(group_id, lock_held):
 
 
 async def start(
-    bot, group_id, member, title, settings, *, force=False, lock_held=False
+    bot,
+    group_id,
+    member,
+    title,
+    settings,
+    *,
+    force=False,
+    lock_held=False,
+    replace_pending=False,
 ):
     if member.is_bot or await actions.is_admin(bot, group_id, member.id):
         return True
     async with _verification_lock(group_id, lock_held):
+        previous_message_id = None
         async with engine.new_session() as session:
             previous = await session.get(Pending, (group_id, member.id))
             if previous and previous.state in {
@@ -45,7 +69,15 @@ async def start(
                 "restricted",
                 "uncertain",
             }:
-                return True
+                if not replace_pending:
+                    return True
+                if previous.state in _UNSAFE_RETRIGGER_STATES:
+                    raise ValueError(
+                        f"当前验证处于 {previous.state} 状态，无法安全重新触发"
+                    )
+                if previous.state not in _RETRIGGERABLE_STATES:
+                    raise ValueError("当前验证状态不允许重新触发")
+                previous_message_id = previous.message_id
         await actions.require_right(bot, group_id, "can_restrict_members")
         snapshot = actions.permissions_snapshot(
             await bot.get_chat_member(group_id, member.id)
@@ -103,6 +135,15 @@ async def start(
         await store.task(
             group_id, "verify", deadline, {"user_id": member.id, "token": token}
         )
+        if previous_message_id:
+            try:
+                await bot.delete_message(group_id, previous_message_id)
+            except TelegramError:
+                logger.info(
+                    "Could not delete replaced verification message %s in chat %s",
+                    previous_message_id,
+                    group_id,
+                )
         try:
             await bot.restrict_chat_member(
                 group_id,
@@ -144,6 +185,94 @@ async def start(
             )
             await session.commit()
         return True
+
+
+async def retrigger(
+    bot,
+    group_id,
+    member,
+    title,
+    settings,
+    *,
+    actor_id: int,
+    request_id: str,
+) -> RetriggerResult:
+    """Force a fresh verification for a current member from an admin command."""
+
+    if member.is_bot or await actions.is_admin(bot, group_id, member.id):
+        raise ValueError("不能对机器人或群管理员重新触发入群验证")
+
+    incident = f"manual-verify:{request_id}"
+    async with store.lock(group_id):
+        receipt, fresh = await store.event(
+            group_id,
+            "verification",
+            source=f"telegram:{actor_id}",
+            status="running",
+            user_id=member.id,
+            incident=incident,
+        )
+        if not fresh:
+            data = receipt.get("data") or {}
+            return RetriggerResult(
+                receipt["status"],
+                data.get("token"),
+                bool(data.get("replaced")),
+                receipt.get("reason"),
+            )
+
+        async with engine.new_session() as session:
+            previous = await session.get(Pending, (group_id, member.id))
+            previous_state = previous.state if previous else None
+            replaced = previous_state in _RETRIGGERABLE_STATES
+            if previous_state in _UNSAFE_RETRIGGER_STATES:
+                error = ValueError(
+                    f"当前验证处于 {previous_state} 状态，无法安全重新触发"
+                )
+                await store.finish_event(
+                    receipt["id"], "failed", {"error": str(error)}
+                )
+                raise error
+
+        try:
+            await start(
+                bot,
+                group_id,
+                member,
+                title,
+                settings,
+                replace_pending=True,
+                lock_held=True,
+            )
+        except (TelegramError, ValueError) as exc:
+            status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
+            await store.finish_event(
+                receipt["id"], status, {"error": type(exc).__name__}
+            )
+            raise
+
+        async with engine.new_session() as session:
+            current = await session.get(Pending, (group_id, member.id))
+            if current is None:
+                return RetriggerResult("failed", None, replaced, "验证记录未创建")
+            result = current.result
+            outcome = RetriggerResult(
+                current.state,
+                current.token if current.state == "pending" else None,
+                replaced,
+                result,
+            )
+
+        await store.finish_event(
+            receipt["id"],
+            outcome.state,
+            {
+                "replaced": replaced,
+                "token": outcome.token,
+                "reason": outcome.reason or "管理员重新触发入群验证",
+            },
+        )
+        return outcome
 
 
 async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
