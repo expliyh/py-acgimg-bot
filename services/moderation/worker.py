@@ -151,7 +151,7 @@ class Worker:
                     await session.execute(
                         delete(GuardEvent).where(
                             GuardEvent.group_id == task.group_id,
-                            GuardEvent.action == "ai",
+                            GuardEvent.action.in_(["ai", "image_grade"]),
                             GuardEvent.incident == f"ai:{message_id}:{version}",
                             GuardEvent.status == "running",
                         )
@@ -530,7 +530,7 @@ class Worker:
             # Temporary records exist even in groups with no moderation events.
             await session.execute(
                 delete(GuardRecord).where(
-                    GuardRecord.kind.in_(["message", "join_seen"]),
+                    GuardRecord.kind.in_(store.TEMPORARY_RECORD_KINDS),
                     GuardRecord.created_at < store.now() - timedelta(days=2),
                 )
             )

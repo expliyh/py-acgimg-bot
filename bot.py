@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import suppress
 from typing import Literal
@@ -39,8 +40,17 @@ class TelegramBot:
         self._mode: Literal["webhook", "polling"] | None = None
         self._app_initialized = False
         self._guard_worker = None
+        self._lifecycle_lock = asyncio.Lock()
 
     async def config(self):
+        async with self._lifecycle_lock:
+            try:
+                await self._configure()
+            except BaseException:
+                await self._shutdown()
+                raise
+
+    async def _configure(self):
         tokens = await config_registry.get_bot_tokens()
         enabled_tokens = [
             token for token in tokens if token.enable and token.token and token.token.strip()
@@ -112,7 +122,8 @@ class TelegramBot:
             await self._shutdown()
 
     async def shutdown(self) -> None:
-        await self._shutdown()
+        async with self._lifecycle_lock:
+            await self._shutdown()
 
     async def _shutdown(self) -> None:
         if self._guard_worker:

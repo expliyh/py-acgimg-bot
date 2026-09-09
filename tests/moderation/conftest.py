@@ -43,6 +43,7 @@ def guard_bot():
     bot = AsyncMock()
     bot.id, bot.defaults = 999, None
     bot.admin_ids = {1, 999}
+    bot.members = {}
     bot.rights = dict.fromkeys(
         (
             "can_delete_messages",
@@ -54,6 +55,8 @@ def guard_bot():
     )
 
     async def get_member(chat_id, user_id):
+        if user_id in bot.members:
+            return bot.members[user_id]
         return SimpleNamespace(
             status="administrator" if user_id in bot.admin_ids else "member",
             user=User(user_id, "Member", False),

@@ -441,15 +441,16 @@ async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
     assert sum(row["state"] == "pending" for row in await jobs()) == 4
 
 
+@pytest.mark.parametrize("event_action", ["ai", "image_grade"])
 async def test_recovery_retries_ai_classification_before_external_actions(
-    guard_group, guard_bot, guard_ai_job, monkeypatch
+    guard_group, guard_bot, guard_ai_job, monkeypatch, event_action
 ):
     job = await guard_ai_job()
     task_id = await store.task(guard_group, "ai", store.now(), job["data"])
     await worker.set_state(task_id, "running", "classifying")
     await store.event(
         guard_group,
-        "ai",
+        event_action,
         incident=f"ai:10:{job['data']['version']}",
         status="running",
         message_id=10,
@@ -462,7 +463,7 @@ async def test_recovery_retries_ai_classification_before_external_actions(
         assert recovered.state == "pending"
         retry = store.dump(recovered)
         assert await session.scalar(
-            select(GuardEvent).where(GuardEvent.action == "ai")
+            select(GuardEvent).where(GuardEvent.action == event_action)
         ) is None
 
     classifier = AsyncMock(
@@ -485,8 +486,9 @@ async def test_recovery_retries_ai_classification_before_external_actions(
 
 
 @pytest.mark.parametrize("phase", ["moderating", "", None])
+@pytest.mark.parametrize("event_action", ["ai", "image_grade"])
 async def test_recovery_preserves_ai_ambiguity_after_moderation_begins(
-    guard_group, guard_bot, guard_ai_job, phase
+    guard_group, guard_bot, guard_ai_job, phase, event_action
 ):
     job = await guard_ai_job()
     task_id = await store.task(guard_group, "ai", store.now(), job["data"])
@@ -498,7 +500,7 @@ async def test_recovery_preserves_ai_ambiguity_after_moderation_begins(
         await session.commit()
     await store.event(
         guard_group,
-        "ai",
+        event_action,
         incident=f"ai:10:{job['data']['version']}",
         status="running",
         message_id=10,
@@ -508,7 +510,7 @@ async def test_recovery_preserves_ai_ambiguity_after_moderation_begins(
     async with engine.new_session() as session:
         assert (await session.get(GuardTask, task_id)).state == "uncertain"
         event = await session.scalar(
-            select(GuardEvent).where(GuardEvent.action == "ai")
+            select(GuardEvent).where(GuardEvent.action == event_action)
         )
         assert event.status == "uncertain"
 

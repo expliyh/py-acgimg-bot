@@ -51,28 +51,55 @@ def permissions_snapshot(member) -> dict:
     return {"permissions": permissions, "until": until.isoformat() if until else None}
 
 
-async def restore_permissions(bot, group_id: int, user_id: int, snapshot: dict):
-    from datetime import datetime, timezone
-
+async def restore_permissions(bot, group_id: int, user_id: int, snapshot: dict, *, verification_token=None):
     chat = await bot.get_chat(group_id)
     defaults = chat.permissions.to_dict() if chat.permissions else {}
     prior = snapshot.get("permissions")
     until = datetime.fromisoformat(snapshot["until"]) if snapshot.get("until") else None
-    if until and until.timestamp() > 0 and until <= datetime.now(timezone.utc):
+    if until and until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    clock = store.now().replace(tzinfo=timezone.utc)
+    if until and until.timestamp() > 0 and until <= clock:
         prior, until = None, None
     values = {
         k: bool(v) and (prior is None or prior.get(k, False))
         for k, v in defaults.items()
         if k.startswith("can_")
     }
+    deferred = bool(until and 0 < (until - clock).total_seconds() <= 60)
+    if deferred:
+        # Telegram interprets deadlines <30s away as permanent. Include a network
+        # margin and persist a new restriction generation before restoring the
+        # prior permissions without a Telegram deadline. The worker releases it
+        # at the original deadline, with the usual ownership and retry checks.
+        event_id = store.uid()
+        recovery = {
+            "original": snapshot,
+            "deadline": until.replace(tzinfo=None).isoformat(),
+            "event_id": event_id,
+            "state": "applying",
+            "verification_token": verification_token,
+        }
+        await store.put_record(
+            group_id, "restriction", str(user_id), recovery, touch=True
+        )
+        await store.task(
+            group_id, "unmute", until,
+            {"user_id": user_id, "event_id": event_id},
+        )
     # Empty defaults must never translate to granting all permissions.
     await bot.restrict_chat_member(
         group_id,
         user_id,
         ChatPermissions(**values),
-        until_date=until,
+        until_date=None if deferred else until,
         use_independent_chat_permissions=True,
     )
+    if deferred:
+        await store.put_record(
+            group_id, "restriction", str(user_id), recovery | {"state": "active"}
+        )
+    return deferred
 
 
 async def execute(
@@ -245,7 +272,9 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
                         snapshot = pending.original_permissions or {}
                         token = pending.token
                     if not target_is_admin:
-                        await restore_permissions(bot, group_id, req.user_id, snapshot)
+                        await restore_permissions(
+                            bot, group_id, req.user_id, snapshot, verification_token=token
+                        )
                     async with engine.new_session() as session:
                         await session.execute(
                             update(Pending)
@@ -265,11 +294,30 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
                     and restriction["data"].get("state") == "external"
                 ):
                     raise ValueError("成员权限已被其他管理员修改，无法自动恢复")
-                if not target_is_admin:
-                    await restore_permissions(
-                        bot, group_id, req.user_id, restriction["data"]["original"]
+                deferred = False
+                async with engine.new_session() as session:
+                    pending = await session.get(Pending, (group_id, req.user_id))
+                    preserve_verification = bool(
+                        not target_is_admin
+                        and pending
+                        and pending.token != restriction["data"].get("event_id")
+                        and pending.token != restriction["data"].get("verification_token")
+                        and pending.state in {
+                            "pending", "preparing", "processing", "restricted", "uncertain"
+                        }
+                        and pending.created_at >= restriction["created_at"]
                     )
-                verification_token = restriction["data"].get("event_id")
+                    if preserve_verification:
+                        pending.original_permissions = restriction["data"]["original"]
+                        await session.commit()
+                        data["verification"] = "preserved"
+                if not target_is_admin and not preserve_verification:
+                    deferred = await restore_permissions(
+                        bot, group_id, req.user_id, restriction["data"]["original"],
+                        verification_token=restriction["data"].get("verification_token")
+                    )
+                verification_token = (restriction["data"].get("verification_token")
+                                      or restriction["data"].get("event_id"))
                 async with engine.new_session() as session:
                     cancelled = await session.execute(
                         update(Pending)
@@ -293,12 +341,13 @@ async def _execute_locked(bot, group_id, req, source, *, target_is_admin=False):
                             )
                         )
                     )
-                    await session.execute(
-                        delete(GuardRecord).where(
-                            GuardRecord.id == restriction["id"],
-                            GuardRecord.group_id == group_id,
+                    if not deferred:
+                        await session.execute(
+                            delete(GuardRecord).where(
+                                GuardRecord.id == restriction["id"],
+                                GuardRecord.group_id == group_id,
+                            )
                         )
-                    )
                     await session.commit()
                 if cancelled.rowcount:
                     data["verification"] = "cancelled"

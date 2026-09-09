@@ -211,6 +211,19 @@ async def process(bot, job):
         return "skipped"
     if not await current(bot, group_id, message, data, settings):
         return "stale"
+    grading = await grading_policy(group_id)
+    text = message.text or message.caption or ""
+    known = (
+        await known_image_grade(message)
+        if settings.ai_images and has_image(message)
+        else None
+    )
+    known_verdict = AIVerdict(category="safe", confidence=1, reason="已知图片分级")
+    known_decision = (
+        disposition(known_verdict, settings, grading, known) if known else None
+    )
+    text_enabled = bool(text and (settings.ai_spam or settings.ai_abuse))
+    local_grade = bool(known and (known_decision != "allow" or not text_enabled))
     async with store.lock(group_id):
         async with engine.new_session() as session:
             count = await session.scalar(
@@ -223,11 +236,11 @@ async def process(bot, job):
                     >= store.now().replace(hour=0, minute=0, second=0, microsecond=0),
                 )
             )
-        if count >= settings.ai_daily_limit:
+        if not local_grade and count >= settings.ai_daily_limit:
             return "budget_exhausted"
         event, fresh = await store.event(
             group_id,
-            "ai",
+            "image_grade" if local_grade else "ai",
             incident=f"ai:{message.message_id}:{data['version']}",
             status="running",
             user_id=message.from_user.id if message.from_user else None,
@@ -236,20 +249,10 @@ async def process(bot, job):
         if not fresh:
             return "duplicate"
     try:
-        grading = await grading_policy(group_id)
         image = None
-        known = None
-        text = message.text or message.caption or ""
         classification_settings = settings
         image_failure = None
-        if settings.ai_images and has_image(message):
-            known = await known_image_grade(message)
-        known_verdict = AIVerdict(category="safe", confidence=1, reason="已知图片分级")
-        known_decision = (
-            disposition(known_verdict, settings, grading, known) if known else None
-        )
-        text_enabled = bool(text and (settings.ai_spam or settings.ai_abuse))
-        if known and (known_decision != "allow" or not text_enabled):
+        if local_grade:
             # Authoritative catalogue metadata needs neither image bytes nor a
             # model. Missing metadata is reviewed; forbidden grades are enforced.
             verdict, usage = known_verdict, {}
@@ -278,7 +281,7 @@ async def process(bot, job):
             verdict, usage = await classify(
                 config, classification_settings, text, image, grading
             )
-        decision = disposition(verdict, settings, grading, known)
+        decision = disposition(verdict, classification_settings, grading, known)
         reason = (
             "已知图片分级不符合群组策略"
             if known

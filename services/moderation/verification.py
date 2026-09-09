@@ -50,6 +50,12 @@ async def start(
         snapshot = actions.permissions_snapshot(
             await bot.get_chat_member(group_id, member.id)
         )
+        rollback_snapshot = snapshot
+        prior_restriction = await store.record(group_id, "restriction", str(member.id))
+        if prior_restriction:
+            # An earlier timed restriction may currently be represented by a
+            # permanent Telegram mask. Keep its true recovery chain, not that mask.
+            snapshot = prior_restriction["data"]["original"]
         token = secrets.token_hex(12)
         timeout = settings.verification_timeout
         deadline = store.now() + timedelta(seconds=timeout)
@@ -92,6 +98,7 @@ async def start(
             row.original_permissions, row.answer, row.result = snapshot, answer, None
             row.message_id = None
             row.completed_at = None
+            row.created_at = store.now()
             await session.commit()
         await store.task(
             group_id, "verify", deadline, {"user_id": member.id, "token": token}
@@ -110,7 +117,9 @@ async def start(
             # If the prompt could not be delivered, undo only our verification restriction.
             result = type(exc).__name__
             try:
-                await actions.restore_permissions(bot, group_id, member.id, snapshot)
+                await actions.restore_permissions(
+                    bot, group_id, member.id, rollback_snapshot, verification_token=token
+                )
                 state = "failed"
             except TelegramError:
                 state, result = "uncertain", result + "; restoration failed"
@@ -199,7 +208,8 @@ async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
                     )
                 else:
                     await actions.restore_permissions(
-                        bot, group_id, user_id, values["original_permissions"] or {}
+                        bot, group_id, user_id, values["original_permissions"] or {},
+                        verification_token=token
                     )
         except (TelegramError, ValueError) as exc:
             status, text = (

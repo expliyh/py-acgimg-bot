@@ -115,6 +115,9 @@ async def test_external_permissions_retire_all_unresolved_verifications(
         "event_id": token, "original": snapshot, "state": "active",
     })
     original = restricted(message.from_user)
+    guard_bot.members[2] = ChatMemberRestricted.de_json(
+        original | {"can_send_photos": True}, guard_bot
+    )
     await runtime.membership(
         membership(message, guard_bot, original,
                    original | {"can_send_photos": True}, actor=1),
@@ -313,6 +316,9 @@ async def test_real_permission_edit_retires_restriction_and_allows_new_mute(
     )
     old_job = (await timers(guard_group))[0]
     old = restricted(message.from_user)
+    guard_bot.members[2] = ChatMemberRestricted.de_json(
+        old | {"can_send_photos": True}, guard_bot
+    )
     await runtime.membership(
         membership(message, guard_bot, old, old | {"can_send_photos": True}, actor=1),
         SimpleNamespace(bot=guard_bot),

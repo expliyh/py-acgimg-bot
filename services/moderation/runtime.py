@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from sqlalchemy import delete, func, select, tuple_
@@ -281,6 +282,39 @@ async def membership(update, context):
         user_id = change.new_chat_member.user.id
         if change.old_chat_member.to_dict() != change.new_chat_member.to_dict():
             async with store.lock(change.chat.id), engine.new_session() as session:
+                event_key = hashlib.sha256(
+                    f"{update.update_id}:{change.to_json()}".encode()
+                ).hexdigest()
+                seen = await session.scalar(
+                    select(GuardRecord).where(
+                        GuardRecord.group_id == change.chat.id,
+                        GuardRecord.kind == "membership_seen",
+                        GuardRecord.key == event_key,
+                    )
+                )
+                if seen:
+                    return
+                event_time = change.date.replace(tzinfo=None)
+                current_member = None
+
+                async def applies_to(started_at):
+                    nonlocal current_member
+                    if event_time < started_at.replace(microsecond=0):
+                        return False
+                    if event_time == started_at.replace(microsecond=0):
+                        # Telegram dates have second precision. A same-second
+                        # event may precede our mutation; validate its live state.
+                        if current_member is None:
+                            current_member = await context.bot.get_chat_member(
+                                change.chat.id, user_id
+                            )
+                        return (
+                            current_member.status == change.new_chat_member.status
+                            and actions.permissions_snapshot(current_member)
+                            == actions.permissions_snapshot(change.new_chat_member)
+                        )
+                    return True
+
                 restriction = await session.scalar(
                     select(GuardRecord).where(
                         GuardRecord.group_id == change.chat.id,
@@ -288,7 +322,7 @@ async def membership(update, context):
                         GuardRecord.key == str(user_id),
                     )
                 )
-                if restriction:
+                if restriction and await applies_to(restriction.created_at):
                     event_id = restriction.data.get("event_id")
                     await session.delete(restriction)
                     tasks = (
@@ -305,21 +339,25 @@ async def membership(update, context):
                             task.state = "cancelled"
                             task.result = "其他管理员已修改成员权限，原禁言任务取消"
                             task.completed_at = store.now()
-                await session.execute(
-                    sql_update(GroupGuardPendingVerification)
-                    .where(
-                        GroupGuardPendingVerification.group_id == change.chat.id,
-                        GroupGuardPendingVerification.user_id == user_id,
-                        GroupGuardPendingVerification.state.in_(
-                            ["pending", "preparing", "processing", "restricted", "uncertain"]
-                        ),
-                    )
-                    .values(
-                        **store.verification_outcome(
-                            "external", "其他管理员已修改成员权限，验证停止"
+                pending = await session.get(
+                    GroupGuardPendingVerification, (change.chat.id, user_id)
+                )
+                if pending and pending.state in {
+                    "pending", "preparing", "processing", "restricted", "uncertain"
+                } and await applies_to(pending.created_at):
+                    await session.execute(
+                        sql_update(GroupGuardPendingVerification)
+                        .where(GroupGuardPendingVerification.token == pending.token)
+                        .values(
+                            **store.verification_outcome(
+                                "external", "其他管理员已修改成员权限，验证停止"
+                            )
                         )
                     )
-                )
+                session.add(GuardRecord(
+                    id=store.uid(), group_id=change.chat.id, kind="membership_seen",
+                    key=event_key, data={}, created_at=store.now(),
+                ))
                 await session.commit()
     await store.event(
         change.chat.id,

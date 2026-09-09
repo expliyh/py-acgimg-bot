@@ -103,6 +103,9 @@ async def test_later_external_permission_change_still_stops_verification(
             if field.startswith("can_")
         },
     }
+    guard_bot.members[2] = ChatMemberRestricted.de_json(
+        restricted | {"can_send_messages": True}, guard_bot
+    )
     await runtime.membership(
         member_update(
             message,
