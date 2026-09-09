@@ -162,7 +162,10 @@ class TelegramBot:
             raise ValueError("Webhook mode requires TELEGRAM_WEBHOOK_SECRET")
         await self.tg_bot.set_webhook(
             webhook_url,
-            drop_pending_updates=True,
+            # Keep updates received while the service was offline. In
+            # particular, my_chat_member is the only signal that lets us
+            # discover a group the bot was added to without a new message.
+            drop_pending_updates=False,
             allowed_updates=Update.ALL_TYPES,
             secret_token=config.telegram_webhook_secret,
         )
@@ -177,7 +180,9 @@ class TelegramBot:
         if not self.tg_app.running:
             await self.tg_app.start()
 
-        await self.tg_bot.delete_webhook(drop_pending_updates=True)
+        # Do not discard updates collected while the process was stopped.
+        # The polling updater will deliver them immediately after startup.
+        await self.tg_bot.delete_webhook(drop_pending_updates=False)
 
         if not self.tg_app.updater:
             raise RuntimeError("Telegram application updater is not available")
