@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 
 from handlers.registry import bot_handler
 from services import group_guard
+from services.moderation import store
 from services.command_history import command_logger
 from services.moderation.actions import is_admin
 from utils import is_group_type
@@ -56,6 +57,9 @@ async def _send_status(update: Update, settings: group_guard.GuardSettings) -> N
         return
     rules = await group_guard.list_keyword_rules(chat.id)
     text = _format_settings_text(settings=settings, keyword_rules=rules)
+    policy = await store.policy(chat.id)
+    text += "\n\n机器人入群审批: " + ("已启用" if policy.bot_join_approval_enabled else "已关闭")
+    text += "\n机器人违规检测: " + ("已启用" if policy.bot_moderation_enabled else "已关闭")
     await update.effective_message.reply_text(text)
 
 

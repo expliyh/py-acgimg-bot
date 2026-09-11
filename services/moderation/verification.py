@@ -3,6 +3,7 @@ import secrets
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import select, update
 from telegram import ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
@@ -12,6 +13,7 @@ from models import GroupGuardPendingVerification as Pending
 from registries import engine
 
 from . import actions, reviews, rules, store
+from .schemas import Policy
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,46 @@ async def start(
     lock_held=False,
     replace_pending=False,
 ):
-    if member.is_bot or await actions.is_admin(bot, group_id, member.id):
+    if member.is_bot:
+        # Bots use the indefinite approval workflow, not the human challenge
+        # table with a timeout.
+        from . import bot_approval
+
+        # Legacy command handlers pass ``GuardSettings``.  Its compatibility
+        # fields can be stale when the Web/API policy was changed, so always
+        # reload the canonical policy for that dataclass; explicit ``Policy``
+        # values remain useful to callers/tests and are honored as supplied.
+        if not isinstance(settings, Policy):
+            settings = await store.policy(group_id)
+        if not getattr(settings, "bot_join_approval_enabled", True):
+            return True
+        try:
+            get_chat = getattr(bot, "get_chat", None)
+            chat = await get_chat(group_id) if get_chat else None
+            chat_id = getattr(chat, "id", None)
+            chat_type = getattr(chat, "type", None)
+            if not isinstance(chat_id, int) or chat_type not in {
+                "group",
+                "supergroup",
+            }:
+                # Lightweight test doubles and older callers may return only
+                # a title/permissions object.  Keep the known group identity
+                # and use the safe supergroup default; a real Chat object
+                # still supplies the authoritative basic/supergroup type.
+                chat = SimpleNamespace(
+                    id=group_id,
+                    type=chat_type if chat_type in {"group", "supergroup"} else "supergroup",
+                    title=getattr(chat, "title", None) or title,
+                )
+        except (AttributeError, TelegramError, ValueError):
+            # A missing chat lookup must still enter the durable bot workflow;
+            # use the known group identity and let its member lookup record a
+            # failed/uncertain approval instead of dropping the join state.
+            chat = SimpleNamespace(id=group_id, type=None, title=title)
+        return await bot_approval.joined(
+            bot, chat, member, settings=settings, lock_held=lock_held
+        )
+    if await actions.is_admin(bot, group_id, member.id):
         return True
     async with _verification_lock(group_id, lock_held):
         previous_message_id = None
@@ -422,7 +463,9 @@ async def callback(update, context, parts):
 async def joined(bot, chat, member, *, lock_held=False):
     settings = await store.policy(chat.id)
     if member.is_bot:
-        return True
+        from . import bot_approval
+
+        return await bot_approval.joined(bot, chat, member, settings=settings, lock_held=lock_held)
     raid = False
     if settings.raid_enabled:
         count = rules.window((chat.id, "joins"), settings.raid_window)
@@ -499,6 +542,10 @@ async def join_request(update, context):
             {
                 "kind": "join",
                 "user_id": request.from_user.id,
+                "is_bot": bool(request.from_user.is_bot),
+                "name": request.from_user.full_name,
+                "username": request.from_user.username,
+                "requested_at": request.date.isoformat(),
                 "reason": f"入群申请：{request.from_user.full_name}",
             },
             context.bot,
@@ -511,26 +558,47 @@ async def join_request(update, context):
         raid and raid["data"]["until"] > store.now().isoformat()
     ):
         try:
-            await actions.require_right(context.bot, group_id, "can_invite_users")
-        except (ValueError, TelegramError) as exc:
-            await create_review(
-                {
-                    "auto_approve": "unavailable",
-                    "error": str(exc)
-                    if isinstance(exc, ValueError)
-                    else type(exc).__name__,
-                }
-            )
-            return
-        try:
-            await context.bot.approve_chat_join_request(group_id, request.from_user.id)
+            if request.from_user.is_bot:
+                # Keep the pre-approval marker and the Telegram approval in
+                # one group lease. A membership update may arrive between
+                # these awaits; it must see the marker before attempting a
+                # bot restriction.
+                from . import bot_approval
+
+                async with store.lock(group_id):
+                    await actions.require_right(
+                        context.bot, group_id, "can_invite_users"
+                    )
+                    await context.bot.approve_chat_join_request(
+                        group_id, request.from_user.id
+                    )
+                    await bot_approval.mark_join_request_approved(
+                        group_id,
+                        request.from_user.id,
+                        user=request.from_user,
+                        date=request.date,
+                        lock_held=True,
+                    )
+            else:
+                await actions.require_right(context.bot, group_id, "can_invite_users")
+                await context.bot.approve_chat_join_request(
+                    group_id, request.from_user.id
+                )
             await store.finish_event(receipt["id"], "success", {"approved": True})
-        except TelegramError as exc:
+        except (ValueError, TelegramError) as exc:
             if isinstance(exc, RetryAfter):
                 # Approval was rejected, so an administrator may safely retry
                 # from the durable review even if its notification is rate limited.
                 await create_review(
                     {"auto_approve": "rate_limited", "error": "RetryAfter"}
+                )
+                return
+            if isinstance(exc, ValueError):
+                await create_review(
+                    {
+                        "auto_approve": "unavailable",
+                        "error": str(exc),
+                    }
                 )
                 return
             await store.finish_event(

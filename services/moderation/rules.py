@@ -153,6 +153,15 @@ def matches(rule: dict, message, allowlist) -> bool:
 
 
 async def evaluate(message, settings):
+    # Bot accounts are opt-in for automatic moderation.  The caller still
+    # performs approval gating before reaching this function; this guard keeps
+    # direct callers and replayed updates safe as well.
+    if (
+        message.from_user
+        and message.from_user.is_bot
+        and not getattr(settings, "bot_moderation_enabled", False)
+    ):
+        return None
     group_id = message.chat_id
     if settings.keyword_filter_enabled:
         for rule in await group_guard.list_keyword_rules(group_id):

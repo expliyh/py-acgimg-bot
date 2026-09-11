@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+from datetime import timedelta
 
 from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy import update as sql_update
@@ -22,7 +23,7 @@ from models import (
 from registries import engine, user_registry
 from services.telegram_cache import get_cached_admin_ids, invalidate_chat_admins
 
-from . import actions, ai, rules, store, verification
+from . import actions, ai, bot_approval, rules, store, verification
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,21 @@ async def preprocess(update, context):
         return
     settings = await store.policy(chat.id)
     for member in message.new_chat_members or []:
-        await member_joined(context.bot, chat, member, message.date)
+        await member_joined(
+            context.bot,
+            chat,
+            member,
+            message.date,
+            event_id=update.update_id,
+            event_source="service",
+        )
     if message.left_chat_member:
-        await member_left(chat.id, message.left_chat_member.id, message.date)
+        await member_left(
+            chat.id,
+            message.left_chat_member.id,
+            message.date,
+            event_id=update.update_id,
+        )
     if message.left_chat_member and settings.goodbye_enabled:
         await context.bot.send_message(
             chat.id,
@@ -78,9 +91,43 @@ async def preprocess(update, context):
                 chat.id, "delete", store.now(), {"message_id": message.message_id}
             )
         return
-    if not (message.text or message.caption or message.effective_attachment):
-        return
     if message.sender_chat and message.sender_chat.id == chat.id:
+        return
+    # Bot approval is independent of the content-moderation switches.  This
+    # check must run even when no keyword/rule/AI feature is enabled (and for
+    # message types without text/``effective_attachment``) so a bot cannot
+    # exploit a missing member update by sending its first message.
+    if (
+        message.from_user
+        and message.from_user.is_bot
+        and message.from_user.id != context.bot.id
+        and not message.sender_chat
+    ):
+        try:
+            blocked_bot = await bot_approval.ensure_message(
+                context.bot,
+                chat,
+                message.from_user,
+                message=message,
+                settings=settings,
+            )
+        except (ValueError, TelegramError) as exc:
+            await store.event(
+                chat.id,
+                "bot_message",
+                status="uncertain" if actions.is_uncertain_error(exc) else "failed",
+                user_id=message.from_user.id,
+                message_id=message.message_id,
+                reason=type(exc).__name__,
+            )
+            blocked_bot = True
+        if blocked_bot:
+            # Deletion failures are deliberately swallowed by ensure_message,
+            # but the update must still stop before command/business handlers.
+            raise ApplicationHandlerStop
+        if not getattr(settings, "bot_moderation_enabled", False):
+            return
+    if not (message.text or message.caption or message.effective_attachment):
         return
     if not (
         settings.keyword_filter_enabled
@@ -98,6 +145,20 @@ async def preprocess(update, context):
     if user_id:
         if user_id == context.bot.id:
             return
+        if message.from_user and message.from_user.is_bot:
+            # Telegram administrator lists are not guaranteed to include bot
+            # accounts in every update shape; query the authoritative member
+            # status before applying automatic rules.
+            try:
+                if await actions.is_admin(context.bot, chat.id, user_id):
+                    if message.edit_date:
+                        await remember_message(chat.id, message)
+                    return
+            except (TelegramError, ValueError):
+                # Unknown admin status is fail-closed for automatic punishment.
+                if message.edit_date:
+                    await remember_message(chat.id, message)
+                return
         admin_ids = await get_cached_admin_ids(context, chat.id)
         if admin_ids is None or user_id in admin_ids:
             if message.edit_date:
@@ -179,7 +240,7 @@ async def preprocess(update, context):
                 )
 
 
-async def member_joined(bot, chat, user, date):
+async def member_joined(bot, chat, user, date, *, event_id=None, event_source=None):
     # Service messages and chat_member updates describe the same transition.
     async with store.lock(chat.id):
         try:
@@ -189,9 +250,73 @@ async def member_joined(bot, chat, user, date):
         old = await store.record(chat.id, "join_seen", str(user.id))
         timestamp = date.timestamp()
         if old and abs(old["data"]["timestamp"] - timestamp) < 10:
-            return
+            if not (
+                getattr(user, "is_bot", False)
+                and user.id != getattr(bot, "id", None)
+            ):
+                return
+            # A delayed leave can preserve the generic join_seen row while a
+            # bot has already rejoined.  For bots, compare the durable
+            # approval generation's join timestamp: an equal/newer timestamp
+            # is a duplicate update, while an older generation must be allowed
+            # to create a fresh approval record.
+            approval = await bot_approval.approval_status(chat.id, user.id)
+            if approval:
+                joined_at = approval["data"].get("joined_at")
+                prior_event_id = approval["data"].get("join_event_id")
+                prior_source = approval["data"].get("join_source")
+                if (
+                    event_source
+                    and prior_source
+                    and event_source != prior_source
+                ):
+                    joined_at = approval["data"].get("joined_at")
+                    try:
+                        # Service and chat-member notifications for the same
+                        # join normally share a Telegram-second.  A clearly
+                        # later cross-source event may instead be a rejoin
+                        # whose departure update was lost.
+                        if (
+                            joined_at is None
+                            or timestamp - bot_approval._stamp(joined_at) <= 2
+                        ):
+                            return
+                    except (TypeError, ValueError):
+                        return
+                if event_id is not None and prior_event_id is not None:
+                    try:
+                        if int(event_id) <= int(prior_event_id):
+                            return
+                    except (TypeError, ValueError):
+                        pass
+                try:
+                    if (
+                        (
+                            event_id is None
+                            or prior_event_id is None
+                        )
+                        and joined_at is not None
+                        and float(joined_at) >= timestamp
+                    ):
+                        return
+                except (TypeError, ValueError):
+                    pass
         try:
-            handled = await verification.joined(bot, chat, user, lock_held=True)
+            if getattr(user, "is_bot", False) and user.id != getattr(bot, "id", None):
+                settings = await store.policy(chat.id)
+                handled = await bot_approval.joined(
+                    bot,
+                    chat,
+                    user,
+                    date,
+                    settings=settings,
+                    lock_held=True,
+                    event_id=event_id,
+                    event_source=event_source,
+                    new_membership=event_id is not None,
+                )
+            else:
+                handled = await verification.joined(bot, chat, user, lock_held=True)
         except (ValueError, TelegramError) as exc:
             status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
             await store.event(
@@ -203,14 +328,45 @@ async def member_joined(bot, chat, user, date):
             )
             return
         if handled:
+            seen_data = {"timestamp": timestamp}
+            if getattr(user, "is_bot", False):
+                seen_data.update(
+                    {
+                        "event_id": event_id,
+                        "event_source": event_source,
+                    }
+                )
             await store.put_record(
-                chat.id, "join_seen", str(user.id), {"timestamp": timestamp}
+                chat.id,
+                "join_seen",
+                str(user.id),
+                seen_data,
             )
 
 
-async def member_left(group_id, user_id, date):
+async def member_left(group_id, user_id, date, *, event_id=None):
     """Retire local state without changing Telegram bans or member permissions."""
     async with store.lock(group_id), engine.new_session() as session:
+        # Bot generations carry their own join timestamp, so a delayed leave
+        # update cannot erase a newer approval.
+        bot_record = await bot_approval.approval_status(group_id, user_id)
+        if bot_record and event_id is not None:
+            joined_event_id = bot_record["data"].get("join_event_id")
+            try:
+                if joined_event_id is not None and int(event_id) < int(joined_event_id):
+                    return
+            except (TypeError, ValueError):
+                pass
+        bot_left = await bot_approval.left(
+            group_id, user_id, date, lock_held=True, event_id=event_id
+        )
+        # ``left`` performs the bot-generation timestamp check as well as the
+        # event-ID check above.  If it rejected this departure as stale, do
+        # not let the generic human-verification cleanup below erase state
+        # belonging to the newer bot generation (which may have no
+        # ``join_seen`` row yet after a restart).
+        if bot_record and not bot_left:
+            return
         joined = await session.scalar(
             select(GuardRecord).where(
                 GuardRecord.group_id == group_id,
@@ -290,10 +446,20 @@ async def membership(update, context):
     is_present = present(change.new_chat_member)
     if not was_present and is_present:
         await member_joined(
-            context.bot, change.chat, change.new_chat_member.user, change.date
+            context.bot,
+            change.chat,
+            change.new_chat_member.user,
+            change.date,
+            event_id=update.update_id,
+            event_source="membership",
         )
     elif was_present and not is_present:
-        await member_left(change.chat.id, change.new_chat_member.user.id, change.date)
+        await member_left(
+            change.chat.id,
+            change.new_chat_member.user.id,
+            change.date,
+            event_id=update.update_id,
+        )
     # Only a permission edit for a current member can invalidate our restriction.
     elif was_present and is_present and change.from_user.id != context.bot.id:
         user_id = change.new_chat_member.user.id
@@ -316,11 +482,17 @@ async def membership(update, context):
 
                 async def applies_to(started_at):
                     nonlocal current_member
-                    if event_time < started_at.replace(microsecond=0):
-                        return False
-                    if event_time == started_at.replace(microsecond=0):
-                        # Telegram dates have second precision. A same-second
-                        # event may precede our mutation; validate its live state.
+                    started = started_at.replace(microsecond=0)
+                    # Telegram membership dates have one-second precision while
+                    # our local record is written with microseconds.  A real
+                    # administrator edit can therefore appear one second
+                    # before ``created_at`` on a busy/slow process.  Validate
+                    # the authoritative live state for that narrow boundary;
+                    # older delayed events remain ignored.
+                    if event_time < started:
+                        if started - event_time > timedelta(seconds=1):
+                            return False
+                    if event_time <= started:
                         if current_member is None:
                             current_member = await context.bot.get_chat_member(
                                 change.chat.id, user_id
@@ -376,6 +548,29 @@ async def membership(update, context):
                     key=event_key, data={}, created_at=store.now(),
                 ))
                 await session.commit()
+            if getattr(change.new_chat_member.user, "is_bot", False):
+                promoted = (
+                    not bot_approval.can_speak(change.old_chat_member)
+                    and bot_approval.can_speak(change.new_chat_member)
+                ) or (
+                    change.old_chat_member.status not in {"creator", "administrator"}
+                    and change.new_chat_member.status in {"creator", "administrator"}
+                )
+                if promoted:
+                    try:
+                        external_admin = await actions.is_admin(
+                            context.bot, change.chat.id, change.from_user.id
+                        )
+                    except TelegramError:
+                        external_admin = False
+                    if external_admin:
+                        await bot_approval.external_permission_change(
+                            change.chat.id,
+                            change.new_chat_member,
+                            lock_held=False,
+                            date=change.date,
+                            event_id=update.update_id,
+                        )
     await store.event(
         change.chat.id,
         "membership",
@@ -524,6 +719,21 @@ async def migrate(old_id, new_id):
                 .where(model.group_id == old_id)
                 .values(group_id=new_id)
             )
+        # A basic group cannot enforce per-bot restrictions, but Telegram
+        # migrates it into a supergroup in place.  Refresh the cached chat type
+        # on carried approval generations so their pending/release tasks can
+        # use ``restrictChatMember`` after the migration.
+        migrated_bot_records = (
+            await session.scalars(
+                select(GuardRecord).where(
+                    GuardRecord.group_id == new_id,
+                    GuardRecord.kind == "bot_approval",
+                )
+            )
+        ).all()
+        for record in migrated_bot_records:
+            if record.data.get("chat_type") == "group":
+                record.data = dict(record.data) | {"chat_type": "supergroup"}
         await session.execute(
             sql_update(CommandHistory)
             .where(CommandHistory.chat_id == old_id)

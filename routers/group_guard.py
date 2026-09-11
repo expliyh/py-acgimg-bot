@@ -152,12 +152,14 @@ async def member(group_id: int, user_id: int):
             if pending
             else None
         )
+    bot_approval = await store.record(group_id, "bot_approval", str(user_id))
     return {
         "user_id": user_id,
         "warnings": await store.warnings(group_id, user_id),
         "restriction": await store.record(group_id, "restriction", str(user_id)),
         "exempt": bool(await store.record(group_id, "exempt", str(user_id))),
         "verification": verification,
+        "bot_approval": bot_approval,
     }
 
 

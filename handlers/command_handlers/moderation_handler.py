@@ -20,6 +20,7 @@ CATEGORIES = {
     "join": (
         "入群",
         [
+            "bot_join_approval_enabled",
             "verification_enabled",
             "verification_mode",
             "verification_timeout",
@@ -36,6 +37,7 @@ CATEGORIES = {
     "rules": (
         "审核",
         [
+            "bot_moderation_enabled",
             "keyword_filter_enabled",
             "rules_enabled",
             "domain_allowlist",
@@ -123,6 +125,8 @@ async def guard_extra(update, context):
         if command == "help":
             await message.reply_text(
                 "/guard set 字段 值（布尔值 on/off；白名单用逗号分隔）\n"
+                "/guard set bot_join_approval_enabled on|off（机器人入群审批）\n"
+                "/guard set bot_moderation_enabled on|off（机器人违规检测）\n"
                 "/guard rule add 名称 keyword|regex|link|invite|forward|media 内容\n"
                 "/guard rule list | remove 名称\n"
                 "/guard content note|reply 名称 内容\n"
