@@ -144,6 +144,28 @@ export interface GuardMember {
   verification: Record<string, unknown> | null;
   bot_approval: GuardRecord<Record<string, unknown>> | null;
 }
+export interface GroupMemberListItem {
+  user_id: number;
+  display_name: string | null;
+  username: string | null;
+  role: "admin" | "member";
+  source: ("message" | "admin" | "moderation")[];
+  message_count: number;
+  last_activity: string | null;
+  warning_count: number;
+  restriction_active: boolean;
+  exempt: boolean;
+  verification_state: string | null;
+}
+export interface GroupMemberListResponse {
+  total: number;
+  items: GroupMemberListItem[];
+  page: number;
+  page_size: number;
+  pages: number;
+  coverage: "observed";
+  telegram_member_count: number | null;
+}
 export interface GuardStats {
   days: { date: string; counts: Record<string, number> }[];
   actions: Record<string, number>;
@@ -192,6 +214,19 @@ export const guardApi = {
     client.delete(`${base(id)}/legacy-rules/${rule}`),
   member: async (id: number, user: number): Promise<GuardMember> =>
     (await client.get(`${base(id)}/members/${user}`)).data,
+  members: async (
+    id: number,
+    params: {
+      q?: string;
+      role?: "admin" | "member";
+      state?: "warned" | "restricted" | "exempt";
+      page?: number;
+      page_size?: number;
+      sort_by?: "id" | "display_name" | "message_count" | "last_activity";
+      sort_order?: "asc" | "desc";
+    } = {},
+  ): Promise<GroupMemberListResponse> =>
+    (await client.get(`${base(id)}/members`, { params })).data,
   exempt: async (id: number, user: number, enabled: boolean) =>
     client.put(`${base(id)}/members/${user}/exempt`, null, {
       params: { enabled },

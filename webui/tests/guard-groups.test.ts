@@ -14,7 +14,7 @@ const apiSource = readFileSync(
 test('smart guard selects known groups and routes immediately', () => {
   assert.match(source, /<VAutocomplete\b/);
   assert.match(source, /listAllGroups\(\)/);
-  assert.match(source, /router\.push\(\{ name: "group-guard"/);
+  assert.match(source, /router\.push\(\{ name: "group-management"/);
   assert.match(source, /id="guard-group-select"/);
   assert.match(source, /按名称或群 ID 搜索/);
   assert.doesNotMatch(source, /v-model\.number="inputGroupId"/);
