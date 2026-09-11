@@ -12,7 +12,7 @@ from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent, GuardRecord, GuardTask
 from registries import engine
 
-from . import actions, ai, store, verification
+from . import actions, ai, bot_approval, store, verification
 from .schemas import ActionRequest, Content
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,15 @@ async def set_state(job_id, state, result=""):
     }
     async with engine.new_session() as session:
         await session.execute(
-            update(GuardTask).where(GuardTask.id == job_id).values(**values)
+            # A task can be cancelled by a leave, approval, or policy change
+            # while a worker is waiting on the group lease. Never let the
+            # stale worker resurrect that terminal state after it returns.
+            update(GuardTask)
+            .where(
+                GuardTask.id == job_id,
+                GuardTask.state.not_in(TERMINAL_TASK_STATES),
+            )
+            .values(**values)
         )
         await session.commit()
 
@@ -333,6 +341,10 @@ class Worker:
                 session.add(successor)
                 pending_announcements.append(successor)
             await session.commit()
+        # Bot approval has its own generation/state machine.  Reconcile it
+        # after the common task recovery transaction so interrupted Telegram
+        # calls become uncertain and missing release jobs are rebuilt.
+        await bot_approval.recover(self.bot)
 
     async def run(self):
         while True:
@@ -457,6 +469,69 @@ class Worker:
                         )
                         return
                     result = "禁言已到期解除"
+            elif kind == "bot_release":
+                result = await bot_approval.release_task(self.bot, job)
+                if result == "uncertain":
+                    await set_state(job["id"], "uncertain", "机器人权限结果不确定，请人工核查")
+                    return
+            elif kind == "bot_restrict":
+                # Serialize the retry with joins, approvals, permission edits
+                # and policy release for this group.  Without the group lease,
+                # a stale worker could re-restrict a bot immediately after an
+                # administrator approved it.
+                async with store.lock(group_id):
+                    record = await bot_approval.approval_status(
+                        group_id, int(data["user_id"])
+                    )
+                    if not record or record["data"].get("generation") != data.get("generation"):
+                        result = "stale"
+                    elif not getattr(
+                        await store.policy(group_id),
+                        "bot_join_approval_enabled",
+                        True,
+                    ) or record["data"].get("release_pending"):
+                        await set_state(
+                            job["id"],
+                            "cancelled",
+                            "机器人入群审批已关闭，限制任务取消",
+                        )
+                        return
+                    elif record["data"].get("state") in {
+                        "uncertain",
+                        "processing",
+                        "restricting",
+                    }:
+                        await set_state(
+                            job["id"],
+                            "uncertain",
+                            "机器人限制结果不确定，请人工核查",
+                        )
+                        return
+                    elif record["data"].get("state") == "approved":
+                        result = "stale"
+                    else:
+                        retry_at = bot_approval.retry_due(record["data"])
+                        if retry_at and retry_at > store.now():
+                            await self.defer_bot(job, retry_at)
+                            return
+                        # RetryAfter is intentionally allowed to bubble to the
+                        # scheduler; uncertain network errors are never replayed.
+                        ok = await bot_approval.retry_restriction(
+                            self.bot, group_id, record, schedule_retry=False
+                        )
+                        if not ok:
+                            latest = await bot_approval.approval_status(
+                                group_id, int(data["user_id"])
+                            )
+                            await set_state(
+                                job["id"],
+                                "uncertain"
+                                if latest and latest["data"].get("state") == "uncertain"
+                                else "failed",
+                                "机器人限制未完成",
+                            )
+                            return
+                        result = "restriction retried"
             elif kind == "announcement":
                 await self.announce(job)
                 return
@@ -464,6 +539,9 @@ class Worker:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if kind in {"bot_restrict", "bot_release", "bot_reject"} and isinstance(exc, RetryAfter):
+                await self.retry_bot(job, exc.retry_after)
+                return
             if kind == "unmute" and isinstance(exc, RetryAfter):
                 await self.retry_unmute(job, exc.retry_after)
                 return
@@ -488,7 +566,10 @@ class Worker:
         async with engine.new_session() as session:
             await session.execute(
                 update(GuardTask)
-                .where(GuardTask.id == job["id"])
+                .where(
+                    GuardTask.id == job["id"],
+                    GuardTask.state.not_in(TERMINAL_TASK_STATES),
+                )
                 .values(
                     state="pending",
                     due_at=store.now() + timedelta(seconds=max(1, delay)),
@@ -496,6 +577,49 @@ class Worker:
                         "retry_attempt": job["data"].get("retry_attempt", 0) + 1
                     },
                     result="Telegram 限流，等待后重试解禁",
+                    completed_at=None,
+                )
+            )
+            await session.commit()
+
+    async def retry_bot(self, job, delay):
+        if isinstance(delay, timedelta):
+            delay = delay.total_seconds()
+        async with engine.new_session() as session:
+            await session.execute(
+                update(GuardTask)
+                .where(
+                    GuardTask.id == job["id"],
+                    GuardTask.state.not_in(TERMINAL_TASK_STATES),
+                )
+                .values(
+                    state="pending",
+                    due_at=store.now() + timedelta(seconds=max(1, delay)),
+                    data=job["data"] | {
+                        "retry_attempt": job["data"].get("retry_attempt", 0) + 1
+                    },
+                    result="Telegram 限流，等待后重试机器人审批任务",
+                    completed_at=None,
+                )
+            )
+            await session.commit()
+
+    async def defer_bot(self, job, due_at):
+        """Return a recovered rate-limited bot task to its stored deadline."""
+
+        if due_at.tzinfo:
+            due_at = due_at.astimezone(timezone.utc).replace(tzinfo=None)
+        async with engine.new_session() as session:
+            await session.execute(
+                update(GuardTask)
+                .where(
+                    GuardTask.id == job["id"],
+                    GuardTask.state.not_in(TERMINAL_TASK_STATES),
+                )
+                .values(
+                    state="pending",
+                    due_at=due_at,
+                    result="机器人限制受限流保护，等待原定重试时间",
                     completed_at=None,
                 )
             )
@@ -570,7 +694,7 @@ class Worker:
                     )
                 ).all()
                 for review in expired_reviews:
-                    if review.data.get("state") in {"resolved", "failed"}:
+                    if review.data.get("state") in {"resolved", "failed", "cancelled"}:
                         await session.delete(review)
                 await session.execute(
                     delete(GuardEvent).where(

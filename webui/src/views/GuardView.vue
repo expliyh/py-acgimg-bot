@@ -118,6 +118,7 @@ const categories: Record<
   join: {
     title: "入群管理",
     fields: [
+      "bot_join_approval_enabled",
       "verification_enabled",
       "verification_mode",
       "verification_timeout",
@@ -134,6 +135,7 @@ const categories: Record<
   rules: {
     title: "规则审核",
     fields: [
+      "bot_moderation_enabled",
       "keyword_filter_enabled",
       "rules_enabled",
       "domain_allowlist",
@@ -175,6 +177,8 @@ const categories: Record<
   },
 };
 const labels: Record<keyof GuardPolicy, string> = {
+  bot_join_approval_enabled: "机器人入群需管理员批准",
+  bot_moderation_enabled: "对机器人启用违规检测",
   verification_enabled: "启用入群验证",
   verification_mode: "验证方式",
   verification_timeout: "验证超时（秒）",
@@ -819,6 +823,9 @@ watch(
               有效警告：{{ member.warnings.length }} ·
               {{ member.exempt ? "已豁免" : "未豁免" }}
             </p>
+            <p v-if="member.bot_approval">
+              机器人审批：{{ member.bot_approval.data.state }}
+            </p>
             <VBtn
               variant="text"
               :disabled="busy"
@@ -961,12 +968,16 @@ watch(
         </VCardText></VCard
       >
       <VCard v-if="tab === 'reviews'"
-        ><VCardTitle>举报与 AI 复核</VCardTitle
+        ><VCardTitle>举报、机器人与 AI 复核</VCardTitle
         ><VCardText
           ><div v-for="row in reviews?.items" :key="row.id" class="mb-5">
             <div class="d-flex ga-2 align-center">
               <VChip>{{ row.data.state }}</VChip
-              ><span
+              ><span v-if="row.data.kind === 'bot_join'">
+                机器人 {{ row.data.name || "未命名" }}
+                <span v-if="row.data.username">@{{ row.data.username }}</span>
+                · ID {{ row.data.user_id }}
+              </span><span v-else
                 >成员 {{ row.data.user_id }} · 消息
                 {{ row.data.message_id }}</span
               >
@@ -989,6 +1000,19 @@ watch(
                   :disabled="busy"
                   @click="decide(row, 'reject_join')"
                   >拒绝</VBtn
+                ></template
+              ><template v-else-if="row.data.kind === 'bot_join'"
+                ><VBtn
+                  variant="text"
+                  :disabled="busy"
+                  @click="decide(row, 'approve_bot')"
+                  >批准发言</VBtn
+                ><VBtn
+                  variant="text"
+                  color="error"
+                  :disabled="busy"
+                  @click="decide(row, 'reject_bot')"
+                  >移出机器人</VBtn
                 ></template
               ><template v-else
                 ><VBtn

@@ -2,6 +2,8 @@ import axios from "axios";
 
 const client = axios.create({ baseURL: "/api", timeout: 30000 });
 export interface GuardPolicy {
+  bot_join_approval_enabled: boolean;
+  bot_moderation_enabled: boolean;
   verification_enabled: boolean;
   verification_timeout: number;
   verification_message: string | null;
@@ -114,11 +116,20 @@ export interface GuardActionResult {
   data: Record<string, unknown>;
 }
 export type ReviewDecision =
-  "dismiss" | "punish" | "revoke" | "approve_join" | "reject_join";
+  | "dismiss"
+  | "punish"
+  | "revoke"
+  | "approve_join"
+  | "reject_join"
+  | "approve_bot"
+  | "reject_bot";
 export interface GuardReview {
   state: string;
   kind: string;
   user_id?: number;
+  name?: string | null;
+  username?: string | null;
+  generation?: string;
   message_id?: number;
   reason: string;
   confidence?: number;
@@ -131,6 +142,7 @@ export interface GuardMember {
   warnings: GuardEvent[];
   restriction: GuardRecord | null;
   verification: Record<string, unknown> | null;
+  bot_approval: GuardRecord<Record<string, unknown>> | null;
 }
 export interface GuardStats {
   days: { date: string; counts: Record<string, number> }[];

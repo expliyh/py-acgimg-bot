@@ -32,6 +32,11 @@ class GuardSettings:
     verification_message: str | None
     keyword_filter_enabled: bool
     kick_on_timeout: bool
+    # These switches live in the extended JSON policy. Keep them on the
+    # compatibility settings object as well so legacy Telegram handlers and
+    # callers observe the same defaults as the FastAPI policy model.
+    bot_join_approval_enabled: bool = True
+    bot_moderation_enabled: bool = False
 
 
 @dataclass(slots=True)
@@ -94,6 +99,7 @@ async def get_guard_settings(group_id: int) -> GuardSettings:
             await session.commit()
             await session.refresh(record)
 
+        policy = record.policy or {}
         settings = GuardSettings(
             group_id=record.group_id,
             verification_enabled=bool(record.verification_enabled),
@@ -101,6 +107,8 @@ async def get_guard_settings(group_id: int) -> GuardSettings:
             verification_message=record.verification_message,
             keyword_filter_enabled=bool(record.keyword_filter_enabled),
             kick_on_timeout=bool(record.kick_on_timeout),
+            bot_join_approval_enabled=bool(policy.get("bot_join_approval_enabled", True)),
+            bot_moderation_enabled=bool(policy.get("bot_moderation_enabled", False)),
         )
 
     async with _cache_lock:

@@ -35,6 +35,12 @@ class StrictModel(BaseModel):
 
 
 class Policy(StrictModel):
+    # Bot accounts are handled independently from ordinary member verification.
+    # Approval is deliberately on by default; automatic content moderation for
+    # bots remains opt-in so existing groups do not suddenly moderate service
+    # integrations and notification bots.
+    bot_join_approval_enabled: bool = True
+    bot_moderation_enabled: bool = False
     verification_enabled: bool = False
     verification_timeout: int = Field(60, ge=15, le=3600)
     verification_message: str | None = Field(
@@ -275,5 +281,13 @@ class AIVerdict(StrictModel):
 
 
 class ReviewDecision(StrictModel):
-    decision: Literal["dismiss", "punish", "revoke", "approve_join", "reject_join"]
+    decision: Literal[
+        "dismiss",
+        "punish",
+        "revoke",
+        "approve_join",
+        "reject_join",
+        "approve_bot",
+        "reject_bot",
+    ]
     reason: str = Field("管理员复核", max_length=1000)

@@ -31,6 +31,12 @@ def has_image(message):
 
 def should_classify(message, settings):
     """Only queue or charge for content covered by an enabled category."""
+    if (
+        message.from_user
+        and message.from_user.is_bot
+        and not getattr(settings, "bot_moderation_enabled", False)
+    ):
+        return False
     return bool(
         (settings.ai_spam or settings.ai_abuse)
         and (message.text or message.caption)
@@ -375,7 +381,16 @@ async def current(bot, group_id, message, data, settings):
     if message.sender_chat and message.sender_chat.id == group_id:
         return False
     if message.from_user and not message.sender_chat:
-        if message.from_user.id == bot.id or await actions.is_admin(
+        if message.from_user.is_bot:
+            if not getattr(settings, "bot_moderation_enabled", False):
+                return False
+            from . import bot_approval
+
+            if not await bot_approval.allowed_for_moderation(
+                bot, group_id, message.from_user.id, settings
+            ):
+                return False
+        elif message.from_user.id == bot.id or await actions.is_admin(
             bot, group_id, message.from_user.id
         ):
             return False

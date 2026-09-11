@@ -77,6 +77,13 @@ def uid() -> str:
     return uuid.uuid4().hex
 
 
+def _task_user_id(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def dump(row) -> dict:
     return {column.name: getattr(row, column.name) for column in row.__table__.columns}
 
@@ -112,7 +119,8 @@ async def policy(group_id: int) -> Policy:
 
 async def save_policy(group_id: int, changes: dict) -> Policy:
     async with lock(group_id):
-        value = Policy.model_validate((await policy(group_id)).model_dump() | changes)
+        previous = await policy(group_id)
+        value = Policy.model_validate(previous.model_dump() | changes)
         async with engine.new_session() as session:
             row = await session.get(GroupGuardSettings, group_id)
             if row is None:
@@ -122,6 +130,89 @@ async def save_policy(group_id: int, changes: dict) -> Policy:
             for key in LEGACY:
                 setattr(row, key, data.pop(key))
             row.policy = data
+            # Disabling approval is an asynchronous Telegram operation.  Queue
+            # one durable release per active generation in the same transaction
+            # as the policy change so a crash cannot leave a bot permanently
+            # restricted or make the API claim the work completed.
+            if not value.bot_join_approval_enabled:
+                active = (
+                    await session.scalars(
+                        select(GuardRecord).where(
+                            GuardRecord.group_id == group_id,
+                            GuardRecord.kind == "bot_approval",
+                            GuardRecord.enabled.is_(True),
+                        )
+                    )
+                ).all()
+                queued = (
+                    await session.scalars(
+                        select(GuardTask).where(
+                            GuardTask.group_id == group_id,
+                            GuardTask.kind == "bot_release",
+                            GuardTask.state.in_(["pending", "running", "uncertain"]),
+                        )
+                    )
+                ).all()
+                queued_generations = {
+                    (
+                        _task_user_id(task.data.get("user_id")),
+                        task.data.get("generation"),
+                    )
+                    for task in queued
+                    if _task_user_id(task.data.get("user_id")) is not None
+                }
+                restrict_jobs = (
+                    await session.scalars(
+                        select(GuardTask).where(
+                            GuardTask.group_id == group_id,
+                            GuardTask.kind == "bot_restrict",
+                            GuardTask.state == "pending",
+                        )
+                )
+                ).all()
+                for record in active:
+                    if record.data.get("state") == "rejected":
+                        continue
+                    try:
+                        record_user_id = int(record.key)
+                    except (TypeError, ValueError):
+                        # Bot approval keys are Telegram IDs.  Ignore a
+                        # malformed legacy record rather than making an
+                        # unrelated policy PATCH fail for the whole group.
+                        continue
+                    generation = record.data.get("generation")
+                    if not generation:
+                        continue
+                    record.data = dict(record.data) | {"release_pending": True}
+                    for restrict_job in restrict_jobs:
+                        if (
+                            _task_user_id(restrict_job.data.get("user_id")) == record_user_id
+                            and restrict_job.data.get("generation") == generation
+                        ):
+                            restrict_job.state = "cancelled"
+                            restrict_job.result = "机器人入群审批已关闭，限制任务取消"
+                            restrict_job.completed_at = now()
+                    if (record_user_id, generation) in queued_generations:
+                        continue
+                    session.add(
+                        GuardTask(
+                            id=uid(),
+                            group_id=group_id,
+                            kind="bot_release",
+                            due_at=now(),
+                            data={
+                                "user_id": record_user_id,
+                                "generation": generation,
+                                "original": record.data.get("original")
+                                or record.data.get("original_permissions"),
+                                "original_permissions": record.data.get("original_permissions")
+                                or record.data.get("original"),
+                                "review_id": record.data.get("review_id"),
+                            },
+                            state="pending",
+                            created_at=now(),
+                        )
+                    )
             await session.commit()
         await group_guard._invalidate_settings_cache(group_id)
         return value
