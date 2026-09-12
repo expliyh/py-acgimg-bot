@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { listAllGroups, type GroupListItem } from "@/services/api";
+import type { DataTableHeader, DataTableSortItem } from "vuetify";
 import {
   guardApi,
   type GuardPolicy,
@@ -19,21 +20,33 @@ import {
   type AIConfig,
   type GuardTask,
   type ReviewDecision,
+  type GroupMemberListItem,
+  type GroupMemberListResponse,
 } from "@/services/guard-api";
 import {
   changedGuardPolicy,
   cloneGuardPolicy,
 } from "@/utils/guard-policy";
 import { shouldRetainActionRequest } from "@/utils/guard-action";
+import { useFeedback } from "@/composables/feedback";
 
 const route = useRoute();
 const router = useRouter();
+const { confirm } = useFeedback();
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean;
+    section?: "overview" | "directory" | "audit";
+    groupId?: number | null;
+  }>(),
+  { embedded: false, section: undefined, groupId: null },
+);
 function parseRouteGroupId(value: unknown): number {
   if (typeof value !== "string") return 0;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed < 0 ? parsed : 0;
 }
-const initialGroupId = parseRouteGroupId(route.params.id);
+const initialGroupId = props.groupId ?? parseRouteGroupId(route.params.id);
 const groupId = ref(initialGroupId);
 const selectedGroupId = ref<number | null>(initialGroupId || null);
 const knownGroups = ref<GroupListItem[]>([]);
@@ -63,7 +76,7 @@ const loading = ref(false),
   error = ref(""),
   groupListError = ref(""),
   success = ref(""),
-  tab = ref("overview");
+  tab = ref(props.section === "directory" ? "directory" : props.section === "audit" ? "reviews" : "overview");
 const policy = ref<GuardPolicy | null>(null);
 const policySnapshot = ref<GuardPolicy | null>(null);
 const permissions = ref<Record<string, unknown>>({});
@@ -80,10 +93,25 @@ const reviews = ref<GuardPage<GuardRecord<GuardReview>> | null>(null),
 const stats = ref<GuardStats | null>(null),
   member = ref<GuardMember | null>(null),
   actionResult = ref<GuardActionResult | null>(null);
+const memberList = ref<GroupMemberListResponse | null>(null);
+const memberListLoading = ref(false);
+const memberListPage = ref(1);
+const memberListPageSize = ref(20);
+const memberListSort = ref<ReadonlyArray<DataTableSortItem>>([
+  { key: "last_activity", order: "desc" },
+]);
+const memberListFilters = reactive<{
+  q: string;
+  role: "admin" | "member" | null;
+  state: "warned" | "restricted" | "exempt" | null;
+}>({ q: "", role: null, state: null });
+const selectedMemberRow = ref<GroupMemberListItem | null>(null);
+const memberDrawer = ref(false);
+let memberDetailVersion = 0;
 const userId = ref<number | null>(null),
   messageId = ref<number | null>(null),
   endMessageId = ref<number | null>(null);
-const action = ref<GuardAction>("warn"),
+const action = ref<GuardAction>("delete"),
   actionReason = ref("管理员操作"),
   actionMinutes = ref(60);
 const ruleName = ref("");
@@ -158,7 +186,7 @@ const categories: Record<
     ],
   },
   members: {
-    title: "成员处罚",
+    title: "消息高级操作",
     fields: ["warning_limit", "warning_days", "mute_seconds"],
   },
   content: {
@@ -312,6 +340,10 @@ async function load() {
   policySnapshot.value = null;
   member.value = null;
   actionResult.value = null;
+  memberList.value = null;
+  selectedMemberRow.value = null;
+  memberDrawer.value = false;
+  ++memberDetailVersion;
   try {
     const values = await Promise.all([
       guardApi.policy(id),
@@ -348,6 +380,7 @@ async function load() {
       .catch((e) => ({ error: detailError(e) }));
     if (version !== loadVersion) return;
     permissions.value = loadedPermissions;
+    if (tab.value === "directory") await loadMemberList();
   } catch (e) {
     if (version === loadVersion) error.value = detailError(e);
   } finally {
@@ -365,12 +398,130 @@ async function loadKnownGroups() {
     groupsLoading.value = false;
   }
 }
+
+const memberHeaders: DataTableHeader<GroupMemberListItem>[] = [
+  { title: "成员", key: "display_name", sortable: true },
+  { title: "用户 ID", key: "id", sortable: true },
+  { title: "角色", key: "role", sortable: false },
+  { title: "状态", key: "state", sortable: false },
+  { title: "消息", key: "message_count", sortable: true },
+  { title: "最后活跃", key: "last_activity", sortable: true },
+  { title: "操作", key: "actions", sortable: false },
+];
+let memberListVersion = 0;
+async function loadMemberList() {
+  const id = groupId.value;
+  if (!id || id >= 0) return;
+  const version = ++memberListVersion;
+  memberListLoading.value = true;
+  try {
+    const sort = memberListSort.value[0];
+    const response = await guardApi.members(id, {
+      q: memberListFilters.q || undefined,
+      role: memberListFilters.role || undefined,
+      state: memberListFilters.state || undefined,
+      page: memberListPage.value,
+      page_size: memberListPageSize.value,
+      sort_by:
+        sort?.key === "id" ||
+        sort?.key === "display_name" ||
+        sort?.key === "message_count" ||
+        sort?.key === "last_activity"
+          ? sort.key
+          : "last_activity",
+      sort_order: sort?.order === "asc" ? "asc" : "desc",
+    });
+    if (version !== memberListVersion) return;
+    memberList.value = response;
+    if (selectedMemberRow.value) {
+      const refreshed = response.items.find(
+        (item) => item.user_id === selectedMemberRow.value!.user_id,
+      );
+      if (refreshed) selectedMemberRow.value = refreshed;
+    }
+  } catch (e) {
+    if (version === memberListVersion) error.value = detailError(e);
+  } finally {
+    if (version === memberListVersion) memberListLoading.value = false;
+  }
+}
+function searchMembers() {
+  memberListPage.value = 1;
+  void loadMemberList();
+}
+function onMemberOptions(options: {
+  page: number;
+  itemsPerPage: number;
+  sortBy: ReadonlyArray<DataTableSortItem>;
+}) {
+  memberListPage.value = options.page;
+  memberListPageSize.value = options.itemsPerPage;
+  memberListSort.value = options.sortBy;
+  void loadMemberList();
+}
+function onMemberRowClick(_: unknown, row: { item: GroupMemberListItem }) {
+  openMember(row.item);
+}
+async function openMember(row: GroupMemberListItem) {
+  const version = ++memberDetailVersion;
+  selectedMemberRow.value = row;
+  memberDrawer.value = true;
+  member.value = null;
+  try {
+    const value = await guardApi.member(groupId.value, row.user_id);
+    if (version === memberDetailVersion) member.value = value;
+  } catch (e) {
+    if (version === memberDetailVersion) error.value = detailError(e);
+  }
+}
+async function openMemberAction(row: GroupMemberListItem, next: GuardAction) {
+  await openMember(row);
+  if (
+    member.value?.user_id === row.user_id &&
+    selectedMemberRow.value?.user_id === row.user_id
+  ) {
+    runMemberAction(next);
+  }
+}
+async function toggleSelectedMemberExempt() {
+  if (!member.value) return;
+  await run(async () => {
+    await guardApi.exempt(
+      groupId.value,
+      member.value!.user_id,
+      !member.value!.exempt,
+    );
+    member.value = await guardApi.member(groupId.value, member.value!.user_id);
+    await loadMemberList();
+  }, member.value.exempt ? "已取消豁免" : "已设置豁免");
+}
+function runMemberAction(next: GuardAction) {
+  if (!selectedMemberRow.value) return;
+  action.value = next;
+  userId.value = selectedMemberRow.value.user_id;
+  // Warning and mute actions need an intentional reason (and mute needs a
+  // duration), so leave the drawer open for the operator to review/edit the
+  // form before sending the request.  The other member actions can execute
+  // immediately, with destructive actions still guarded by confirmation.
+  if (next === "warn" || next === "mute") return;
+  if (next === "kick" || next === "ban") {
+    confirm.require({
+      header: next === "ban" ? "确认封禁成员" : "确认移出成员",
+      message: `将对成员 ${selectedMemberRow.value.user_id} 执行${next === "ban" ? "封禁" : "移出"}，是否继续？`,
+      icon: "mdi-alert",
+      acceptLabel: "继续",
+      accept: () => void perform(),
+    });
+    return;
+  }
+  void perform();
+}
 function selectGroup(value: number | null) {
   selectedGroupId.value = value;
   if (value === null) {
-    void router.push({ name: "guard" });
+    void router.push({ name: "groups" });
   } else if (parseRouteGroupId(route.params.id) !== value) {
-    void router.push({ name: "group-guard", params: { id: String(value) } });
+    void router.push({ name: "group-management", params: { id: String(value) } });
   }
 }
 async function savePolicy() {
@@ -411,15 +562,13 @@ function editContent(row: GuardRecord<GuardContent>) {
   Object.assign(contentForm, row.data);
   dueAt.value = row.data.due_at || "";
 }
-async function lookup() {
-  await run(async () => {
-    if (!userId.value) throw new Error("请输入成员 ID");
-    member.value = await guardApi.member(groupId.value, userId.value);
-  }, "已读取成员状态");
-}
 let pendingAction: { fingerprint: string; requestId: string } | null = null;
 async function perform() {
   await run(async () => {
+    if ((action.value === "warn" || action.value === "mute") && !actionReason.value.trim())
+      throw new Error("请填写操作理由");
+    if (action.value === "mute" && (!Number.isFinite(actionMinutes.value) || actionMinutes.value <= 0))
+      throw new Error("禁言时长必须大于 0 分钟");
     const payload = {
       action: action.value,
       user_id: messageActions.has(action.value)
@@ -448,6 +597,7 @@ async function perform() {
     pendingAction = null;
     if (userId.value)
       member.value = await guardApi.member(groupId.value, userId.value);
+    if (tab.value === "directory") await loadMemberList();
   }, "操作成功");
 }
 async function decide(row: GuardRecord<GuardReview>, decision: ReviewDecision) {
@@ -490,8 +640,11 @@ watch(taskPage, (p) => {
       tasks.value = await guardApi.tasks(groupId.value, p);
     }, "");
 });
+watch(tab, (value) => {
+  if (value === "directory" && policy.value) void loadMemberList();
+});
 onMounted(async () => {
-  await loadKnownGroups();
+  if (!props.embedded) await loadKnownGroups();
   if (groupId.value) void load();
 });
 watch(
@@ -511,13 +664,13 @@ watch(
 
 <template>
   <div class="d-flex flex-column ga-5">
-    <div>
+    <div v-if="!props.embedded">
       <h1 class="text-h4 font-weight-bold">智能群管</h1>
       <p class="text-body-2 text-medium-emphasis mt-2">
         按群配置审核、入群和运营。新增自动功能需要手动启用。
       </p>
     </div>
-    <VCard
+    <VCard v-if="!props.embedded"
       ><VCardText class="d-flex ga-3 align-center flex-wrap"
         ><VAutocomplete
           id="guard-group-select"
@@ -555,14 +708,21 @@ watch(
       >{{ success }}</VAlert
     >
     <template v-if="policy && !loading">
-      <VTabs v-model="tab" show-arrows
-        ><VTab value="overview">概览</VTab
-        ><VTab v-for="(category, key) in categories" :key="key" :value="key">{{
-          category.title
-        }}</VTab
-        ><VTab value="reviews">举报复核</VTab
-        ><VTab value="logs">日志与任务</VTab></VTabs
-      >
+      <VTabs v-if="props.section !== 'directory'" v-model="tab" show-arrows>
+        <template v-if="props.section === 'audit'">
+          <VTab value="reviews">举报复核</VTab>
+          <VTab value="logs">日志与任务</VTab>
+        </template>
+        <template v-else-if="props.section === 'overview'">
+          <VTab value="overview">概览</VTab>
+        </template>
+        <template v-else>
+          <VTab value="overview">概览</VTab>
+          <VTab v-for="(category, key) in categories" :key="key" :value="key">{{ category.title }}</VTab>
+          <VTab value="reviews">举报复核</VTab>
+          <VTab value="logs">日志与任务</VTab>
+        </template>
+      </VTabs>
       <VCard v-if="tab === 'overview'"
         ><VCardTitle>最近 30 天</VCardTitle
         ><VCardText class="d-flex flex-column ga-4">
@@ -811,73 +971,18 @@ watch(
         </VCardText></VCard
       >
       <VCard v-if="tab === 'members'"
-        ><VCardTitle>成员与消息操作</VCardTitle
+        ><VCardTitle>消息级高级操作</VCardTitle
         ><VCardText class="d-flex flex-column ga-3">
-          <VTextField
-            v-model.number="userId"
-            type="number"
-            label="成员 ID"
-          /><VBtn :loading="busy" @click="lookup">查看成员状态</VBtn>
-          <div v-if="member">
-            <p>
-              有效警告：{{ member.warnings.length }} ·
-              {{ member.exempt ? "已豁免" : "未豁免" }}
-            </p>
-            <p v-if="member.bot_approval">
-              机器人审批：{{ member.bot_approval.data.state }}
-            </p>
-            <VBtn
-              variant="text"
-              :disabled="busy"
-              @click="
-                run(async () => {
-                  await guardApi.exempt(
-                    groupId,
-                    member!.user_id,
-                    !member!.exempt,
-                  );
-                  member = await guardApi.member(groupId, member!.user_id);
-                })
-              "
-              >{{ member.exempt ? "取消豁免" : "豁免内容和刷屏审核" }}</VBtn
-            >
-            <p v-if="member.restriction">
-              本系统限制：{{ member.restriction.data }}
-            </p>
-            <p v-if="member.verification">
-              验证：{{ member.verification.state }} ·
-              {{ member.verification.result }}
-            </p>
-            <div v-for="warning in member.warnings" :key="warning.id">
-              {{ warning.reason }}（{{ warning.created_at }}）<VBtn
-                variant="text"
-                :disabled="busy"
-                @click="
-                  run(async () => {
-                    const r = await guardApi.revoke(groupId, warning.id);
-                    if (r.status !== 'success')
-                      throw new Error(JSON.stringify(r.data));
-                    member = await guardApi.member(groupId, member!.user_id);
-                  }, '已撤销警告')
-                "
-                >撤销</VBtn
-              >
-            </div>
-          </div>
+          <VAlert type="info" variant="tonal" density="compact">
+            成员查询与单成员处罚已迁移到“群成员”目录；这里仅保留需要消息 ID 的删除、置顶和批量清理。
+          </VAlert>
           <VSelect
             v-model="action"
             :items="[
-              'warn',
-              'unwarn',
-              'mute',
-              'unmute',
-              'kick',
-              'ban',
-              'unban',
-              'delete',
-              'pin',
-              'unpin',
-              'purge',
+              { title: '删除消息', value: 'delete' },
+              { title: '置顶消息', value: 'pin' },
+              { title: '取消置顶', value: 'unpin' },
+              { title: '批量清理', value: 'purge' },
             ]"
             label="操作"
           />
@@ -891,14 +996,9 @@ watch(
             v-model.number="endMessageId"
             type="number"
             label="清理终点消息 ID（最多 100 条）"
-          /><VTextField
-            v-if="action === 'mute'"
-            v-model.number="actionMinutes"
-            type="number"
-            label="禁言分钟数"
           /><VTextField v-model="actionReason" label="操作理由" />
           <VBtn color="error" :loading="busy" @click="perform"
-            >执行所选操作</VBtn
+            >执行消息操作</VBtn
           ><VAlert
             v-if="actionResult"
             :type="actionResult.status === 'success' ? 'success' : 'warning'"
@@ -967,6 +1067,130 @@ watch(
           >
         </VCardText></VCard
       >
+      <VCard v-if="tab === 'directory'" class="group-members-card">
+        <VCardTitle class="d-flex align-center ga-2 flex-wrap">
+          <VIcon icon="mdi-account-multiple-outline" color="primary" />
+          <span>群成员</span>
+          <VChip size="small" color="info">已观测 {{ memberList?.total || 0 }}</VChip>
+          <VChip v-if="memberList?.telegram_member_count != null" size="small" color="secondary">
+            Telegram 总数 {{ memberList.telegram_member_count }}
+          </VChip>
+        </VCardTitle>
+        <VCardText class="d-flex flex-column ga-3">
+          <VAlert type="info" variant="tonal" density="compact">
+            列表来自机器人已观测记录（消息、管理员和群管事件），不代表 Telegram 普通成员的完整名单。
+          </VAlert>
+          <VRow class="align-end">
+            <VCol cols="12" md="5">
+              <VTextField
+                id="group-members-search"
+                v-model="memberListFilters.q"
+                label="搜索成员"
+                placeholder="用户 ID、用户名或显示名"
+                prepend-inner-icon="mdi-magnify"
+                hide-details
+                @keydown.enter="searchMembers"
+              />
+            </VCol>
+            <VCol cols="6" md="3">
+              <VSelect
+                id="group-members-role"
+                v-model="memberListFilters.role"
+                label="角色"
+                :items="[
+                  { title: '全部角色', value: null },
+                  { title: '管理员', value: 'admin' },
+                  { title: '普通成员', value: 'member' },
+                ]"
+                hide-details
+                @update:model-value="searchMembers"
+              />
+            </VCol>
+            <VCol cols="6" md="3">
+              <VSelect
+                id="group-members-state"
+                v-model="memberListFilters.state"
+                label="状态"
+                :items="[
+                  { title: '全部状态', value: null },
+                  { title: '有警告', value: 'warned' },
+                  { title: '受限中', value: 'restricted' },
+                  { title: '已豁免', value: 'exempt' },
+                ]"
+                hide-details
+                @update:model-value="searchMembers"
+              />
+            </VCol>
+            <VCol cols="12" md="1" class="d-flex justify-end">
+              <VBtn icon="mdi-refresh" variant="text" aria-label="刷新成员列表" :loading="memberListLoading" @click="searchMembers" />
+            </VCol>
+          </VRow>
+          <VDataTableServer
+            :headers="memberHeaders"
+            :items="memberList?.items || []"
+            :loading="memberListLoading"
+            item-value="user_id"
+            :page="memberListPage"
+            :items-length="memberList?.total || 0"
+            :items-per-page="memberListPageSize"
+            :items-per-page-options="[20, 50, 100]"
+            :sort-by="memberListSort"
+            class="rounded-lg border"
+            @update:options="onMemberOptions"
+            @click:row="onMemberRowClick"
+          >
+            <template #item.display_name="{ item }">
+              <div class="d-flex align-center ga-2 py-1">
+                <VAvatar size="32" color="primary" variant="tonal">
+                  <span class="text-caption">{{ (item.display_name || '用').slice(0, 1) }}</span>
+                </VAvatar>
+                <div class="d-flex flex-column">
+                  <span class="font-weight-medium">{{ item.display_name || `用户 ${item.user_id}` }}</span>
+                  <span class="text-caption text-medium-emphasis">
+                    {{ item.username ? `@${item.username}` : '无用户名' }} · {{ item.user_id }}
+                  </span>
+                </div>
+              </div>
+            </template>
+            <template #item.role="{ item }">
+              <VChip size="small" :color="item.role === 'admin' ? 'primary' : 'default'">
+                {{ item.role === 'admin' ? '管理员' : '成员' }}
+              </VChip>
+            </template>
+            <template #item.id="{ item }">
+              <span class="text-body-2 text-medium-emphasis">{{ item.user_id }}</span>
+            </template>
+            <template #item.state="{ item }">
+              <div class="d-flex ga-1 flex-wrap">
+                <VChip v-if="item.warning_count" size="small" color="warning">警告 {{ item.warning_count }}</VChip>
+                <VChip v-if="item.restriction_active" size="small" color="error">受限</VChip>
+                <VChip v-if="item.exempt" size="small" color="success">豁免</VChip>
+                <span v-if="!item.warning_count && !item.restriction_active && !item.exempt" class="text-caption text-medium-emphasis">正常</span>
+              </div>
+            </template>
+            <template #item.last_activity="{ item }">
+              {{ item.last_activity ? new Date(item.last_activity).toLocaleString() : '暂无' }}
+            </template>
+            <template #item.actions="{ item }">
+              <VMenu>
+                <template #activator="{ props }">
+                  <VBtn v-bind="props" icon="mdi-dots-vertical" size="small" variant="text" aria-label="成员操作" />
+                </template>
+                <VList density="compact">
+                  <VListItem title="查看详情" @click="openMember(item)" />
+                  <VListItem title="警告" @click="openMemberAction(item, 'warn')" />
+                  <VListItem title="禁言" @click="openMemberAction(item, 'mute')" />
+                  <VListItem title="移出" @click="openMemberAction(item, 'kick')" />
+                  <VListItem title="封禁" @click="openMemberAction(item, 'ban')" />
+                </VList>
+              </VMenu>
+            </template>
+          </VDataTableServer>
+          <VAlert v-if="!memberListLoading && !memberList?.items.length" type="info" variant="tonal">
+            暂无符合条件的已观测成员。
+          </VAlert>
+        </VCardText>
+      </VCard>
       <VCard v-if="tab === 'reviews'"
         ><VCardTitle>举报、机器人与 AI 复核</VCardTitle
         ><VCardText
@@ -1112,6 +1336,86 @@ watch(
               :length="tasks?.pages || 1" /></VCardText
         ></VCard>
       </template>
+      <VNavigationDrawer
+        v-model="memberDrawer"
+        location="right"
+        temporary
+        width="420"
+      >
+        <VCard flat v-if="selectedMemberRow">
+          <VCardTitle class="d-flex align-center ga-2">
+            <VAvatar color="primary" variant="tonal">
+              {{ (selectedMemberRow.display_name || '用').slice(0, 1) }}
+            </VAvatar>
+            <div class="d-flex flex-column">
+              <span>{{ selectedMemberRow.display_name || `用户 ${selectedMemberRow.user_id}` }}</span>
+              <span class="text-caption text-medium-emphasis">{{ selectedMemberRow.user_id }}</span>
+            </div>
+            <VSpacer />
+            <VBtn icon="mdi-close" variant="text" aria-label="关闭成员详情" @click="memberDrawer = false" />
+          </VCardTitle>
+          <VCardText class="d-flex flex-column ga-3">
+            <div class="d-flex ga-2 flex-wrap">
+              <VChip size="small" :color="selectedMemberRow.role === 'admin' ? 'primary' : 'default'">
+                {{ selectedMemberRow.role === 'admin' ? '管理员' : '成员' }}
+              </VChip>
+              <VChip v-if="selectedMemberRow.warning_count" size="small" color="warning">
+                警告 {{ selectedMemberRow.warning_count }}
+              </VChip>
+              <VChip v-if="selectedMemberRow.restriction_active" size="small" color="error">受限</VChip>
+              <VChip v-if="selectedMemberRow.exempt" size="small" color="success">豁免</VChip>
+            </div>
+            <p class="text-body-2 text-medium-emphasis mb-0">
+              {{ selectedMemberRow.username ? `@${selectedMemberRow.username}` : '暂无用户名' }} · 消息 {{ selectedMemberRow.message_count }}
+            </p>
+            <VAlert v-if="!member" type="info" variant="tonal">正在读取成员状态…</VAlert>
+            <template v-else>
+              <VAlert v-if="member.verification" type="warning" variant="tonal">
+                验证：{{ member.verification.state }} · {{ member.verification.result }}
+              </VAlert>
+              <VAlert v-if="member.restriction" type="warning" variant="tonal">
+                本系统限制：{{ member.restriction.data }}
+              </VAlert>
+              <VAlert v-if="member.bot_approval" type="info" variant="tonal">
+                机器人审批：{{ member.bot_approval.data.state || '已记录' }}
+              </VAlert>
+              <div v-if="member.warnings.length" class="d-flex flex-column ga-2">
+                <h3 class="text-subtitle-2">有效警告</h3>
+                <div v-for="warning in member.warnings" :key="warning.id" class="d-flex align-center ga-2">
+                  <span class="text-body-2 flex-grow-1">{{ warning.reason || '未填写理由' }}</span>
+                  <VBtn size="small" variant="text" :disabled="busy" @click="run(async () => { const r = await guardApi.revoke(groupId, warning.id); if (r.status !== 'success') throw new Error(JSON.stringify(r.data)); member = await guardApi.member(groupId, member!.user_id); await loadMemberList(); }, '已撤销警告')">撤销</VBtn>
+                </div>
+              </div>
+              <VBtn variant="tonal" :disabled="busy" @click="toggleSelectedMemberExempt">
+                {{ member.exempt ? '取消豁免' : '豁免内容和刷屏审核' }}
+              </VBtn>
+              <VDivider />
+              <h3 class="text-subtitle-2">快捷处罚</h3>
+              <div class="d-flex ga-2 flex-wrap">
+                <VBtn size="small" color="warning" variant="tonal" :disabled="busy" @click="runMemberAction('warn')">警告</VBtn>
+                <VBtn size="small" color="warning" variant="tonal" :disabled="busy" @click="runMemberAction('mute')">禁言</VBtn>
+                <VBtn size="small" variant="outlined" :disabled="busy" @click="runMemberAction('unmute')">解除禁言</VBtn>
+                <VBtn size="small" color="error" variant="tonal" :disabled="busy" @click="runMemberAction('kick')">移出</VBtn>
+                <VBtn size="small" color="error" variant="tonal" :disabled="busy" @click="runMemberAction('ban')">封禁</VBtn>
+                <VBtn size="small" variant="outlined" :disabled="busy" @click="runMemberAction('unban')">解除封禁</VBtn>
+              </div>
+              <VTextField v-if="action === 'mute'" v-model.number="actionMinutes" type="number" label="禁言分钟数" min="1" />
+              <VTextField v-model="actionReason" label="操作理由" />
+              <VBtn
+                v-if="action === 'warn' || action === 'mute'"
+                color="warning"
+                :loading="busy"
+                @click="perform"
+              >
+                执行{{ action === 'warn' ? '警告' : '禁言' }}
+              </VBtn>
+            </template>
+            <VAlert v-if="actionResult" :type="actionResult.status === 'success' ? 'success' : 'warning'">
+              {{ actionResult.status }} · {{ actionResult.data }}
+            </VAlert>
+          </VCardText>
+        </VCard>
+      </VNavigationDrawer>
     </template>
   </div>
 </template>

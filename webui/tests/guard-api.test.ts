@@ -81,6 +81,29 @@ test('pagination and filters remain query parameters on the current group', asyn
   ]);
 });
 
+test('observed member directory keeps search, filters, sorting, and paging group scoped', async () => {
+  response = { items: [], total: 0, page: 2, page_size: 50, pages: 0, coverage: 'observed', telegram_member_count: null };
+  assert.equal(await guardApi.members(group, {
+    q: 'member',
+    role: 'admin',
+    state: 'warned',
+    page: 2,
+    page_size: 50,
+    sort_by: 'last_activity',
+    sort_order: 'desc',
+  }), response);
+  assert.equal(requests[0].url, `${root}/members`);
+  assert.deepEqual(requests[0].params, {
+    q: 'member',
+    role: 'admin',
+    state: 'warned',
+    page: 2,
+    page_size: 50,
+    sort_by: 'last_activity',
+    sort_order: 'desc',
+  });
+});
+
 test('review decisions and disabling an exemption use their intended contract', async () => {
   response = { id: 'review-id', data: { state: 'resolved' } };
   assert.equal(await guardApi.decide(group, 'review-id', 'reject_join'), response);

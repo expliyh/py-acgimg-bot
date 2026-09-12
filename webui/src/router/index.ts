@@ -3,8 +3,11 @@ import { createRouter, createWebHistory } from 'vue-router';
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/groups/:id/guard', name: 'group-guard', component: () => import('@/views/GuardView.vue') },
-    { path: '/guard', name: 'guard', component: () => import('@/views/GuardView.vue') },
+    {
+      path: '/groups/:id/guard',
+      redirect: (to) => ({ name: 'group-management', params: { id: to.params.id } }),
+    },
+    { path: '/guard', redirect: { name: 'groups' } },
     {
       path: '/',
       redirect: '/dashboard'
@@ -17,6 +20,11 @@ const router = createRouter({
     {
       path: '/groups',
       name: 'groups',
+      component: () => import('@/views/GroupsView.vue')
+    },
+    {
+      path: '/groups/:id',
+      name: 'group-management',
       component: () => import('@/views/GroupsView.vue')
     },
     {

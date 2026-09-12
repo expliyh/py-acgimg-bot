@@ -1,6 +1,6 @@
 """ASGI contracts, real persistence and group isolation for the guard UI."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,7 +9,8 @@ import pytest
 from sqlalchemy import select, update
 from telegram.error import BadRequest
 
-from models import Group, GroupGuardSettings, GuardEvent, GuardTask
+from defines import MessageType
+from models import Group, GroupChatHistory, GroupGuardSettings, GuardEvent, GuardRecord, GuardTask, User
 from registries import engine
 from services import group_guard
 from services.moderation import reviews, store, verification
@@ -309,3 +310,83 @@ async def test_webhook_secret_required_and_valid_request_dispatched(api, monkeyp
     assert response.status_code == 200 and response.json() == {"ok": True}
     receiver.assert_awaited_once()
     assert await receiver.call_args.args[0].json() == {"update_id": 12}
+
+
+async def test_observed_member_directory_merges_sources_and_filters(
+    api, guard_group, guard_bot, monkeypatch
+):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    async with engine.new_session() as session:
+        group = await session.get(Group, guard_group)
+        group.admin_ids = [7, 8]
+        session.add_all([
+            User(id=2, username="member", nick_name="普通成员"),
+            User(id=7, username="admin", nick_name="管理员"),
+            GroupChatHistory(
+                message_id=1,
+                group_id=guard_group,
+                user_id=2,
+                type=MessageType.TEXT,
+                bot_send=False,
+                text="hello",
+                sent_at=now,
+            ),
+            GuardRecord(
+                id="exempt-record",
+                group_id=guard_group,
+                kind="exempt",
+                key="2",
+                data={},
+                enabled=True,
+                created_at=now,
+            ),
+            GuardRecord(
+                id="restriction-record",
+                group_id=guard_group,
+                kind="restriction",
+                key="2",
+                data={"state": "uncertain"},
+                enabled=True,
+                created_at=now,
+            ),
+        ])
+        await session.commit()
+    await store.event(guard_group, "warn", user_id=2, reason="spam")
+    guard_bot.get_chat_member_count.return_value = 42
+
+    root = f"/api/groups/{guard_group}/guard/members"
+    response = await api.get(root, params={"sort_by": "id", "sort_order": "asc"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["coverage"] == "observed"
+    assert payload["telegram_member_count"] == 42
+    assert payload["total"] == 3
+    assert [item["user_id"] for item in payload["items"]] == [2, 7, 8]
+    member = payload["items"][0]
+    assert member["display_name"] == "普通成员"
+    assert member["source"] == ["message", "moderation"]
+    assert member["warning_count"] == 1
+    assert member["exempt"] is True
+    assert member["restriction_active"] is True
+    assert payload["items"][2]["display_name"] == "用户 8"
+
+    filtered = await api.get(root, params={"role": "admin", "q": "管理员"})
+    assert filtered.status_code == 200
+    assert [item["user_id"] for item in filtered.json()["items"]] == [7]
+    other_group = await api.get(f"/api/groups/{guard_group + 1}/guard/members")
+    assert other_group.status_code == 200
+    assert other_group.json()["total"] == 0
+
+    # Telegram count is optional: a failed lookup or a disconnected bot must
+    # not make the observed database directory unavailable.
+    guard_bot.get_chat_member_count.side_effect = BadRequest("count unavailable")
+    failed_count = await api.get(root)
+    assert failed_count.status_code == 200
+    assert failed_count.json()["telegram_member_count"] is None
+    from bot import tg_bot
+
+    monkeypatch.setattr(tg_bot, "tg_bot", None)
+    disconnected = await api.get(root)
+    assert disconnected.status_code == 200
+    assert disconnected.json()["total"] == 3
+    assert disconnected.json()["telegram_member_count"] is None

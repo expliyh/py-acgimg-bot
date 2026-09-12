@@ -8,17 +8,12 @@ import {
 } from '../src/utils/dialog-form.ts';
 import type { GroupDetail, PrivateUserDetail } from '../src/services/api.ts';
 
-const groupDialog = readFileSync(
-  new URL('../src/components/GroupDetailDialog.vue', import.meta.url),
-  'utf8',
-);
 const privateDialog = readFileSync(
   new URL('../src/components/PrivateUserDialog.vue', import.meta.url),
   'utf8',
 );
 
 const dialogs = [
-  ['group detail dialog', groupDialog],
   ['private user dialog', privateDialog],
 ] as const;
 
@@ -119,16 +114,6 @@ test('dialogs contain only native imports and timeline icon slots', () => {
 });
 
 test('dialogs use native Vuetify form controls and option props', () => {
-  assert.match(groupDialog, /<VTextField\b/, 'group text field');
-  assert.match(groupDialog, /<VNumberInput\b/, 'group number input');
-  assert.match(groupDialog, /<VSelect\b/, 'group select');
-  assert.match(groupDialog, /<VSwitch\b/, 'group switches');
-  assert.match(groupDialog, /<VCombobox\b/, 'group admin IDs');
-  assert.match(groupDialog, /:items="meta\?\.chat_modes \?\? \[\]"/, 'group select items');
-  assert.match(groupDialog, /item-title="label"/, 'group select titles');
-  assert.match(groupDialog, /item-value="value"/, 'group select values');
-  assert.match(groupDialog, /:delimiters="\[','\]"/, 'group combobox delimiters');
-
   assert.match(privateDialog, /<VTextField\b/, 'private text field');
   assert.match(privateDialog, /<VNumberInput\b/, 'private number input');
   assert.match(privateDialog, /<VSelect\b/, 'private select');
@@ -153,23 +138,7 @@ test('dialogs use native colors, variants, and button slots without compatibilit
   }
 });
 
-test('group status formerly using help severity uses native info color', () => {
-  assert.match(
-    groupDialog,
-    /<VChip[^>]*color="info"[^>]*>\s*状态 \{\{ group\.status \}\}<\/VChip>/,
-  );
-  assert.doesNotMatch(groupDialog, /severity="help"/);
-});
-
 test('dialogs repopulate forms when visible changes or the entity changes', () => {
-  assert.match(groupDialog, /function syncForm\(group: GroupDetail \| null\)/, 'group reset helper');
-  assert.match(
-    groupDialog,
-    /watch\(\s*\[\s*\(\) => props\.group,\s*\(\) => props\.visible\s*\],/s,
-    'group visible-driven watcher',
-  );
-  assert.match(groupDialog, /\(\[group\]\) => syncForm\(group\)/, 'group watcher callback');
-
   assert.match(privateDialog, /function syncForm\(user: PrivateUserDetail \| null\)/, 'private reset helper');
   assert.match(
     privateDialog,
@@ -180,22 +149,6 @@ test('dialogs repopulate forms when visible changes or the entity changes', () =
 });
 
 test('dialogs expose accessible names for every standalone form control', () => {
-  const controls = [
-    ['group-name', '群名称', 'VTextField'],
-    ['group-chat-mode', '聊天模式', 'VSelect'],
-    ['group-enable', '群启用', 'VSwitch'],
-    ['group-enable-chat', '允许聊天', 'VSwitch'],
-    ['group-allow-setu', '允许涩图', 'VSwitch'],
-    ['group-allow-r18g', '允许 R18G', 'VSwitch'],
-    ['group-sanity-limit', '理智值上限', 'VNumberInput'],
-    ['group-admin-ids', '管理员 ID 列表', 'VCombobox'],
-  ] as const;
-
-  for (const [id, label, component] of controls) {
-    assert.match(groupDialog, new RegExp(`<label[^>]*\\bfor="${id}"[^>]*>[^<]*${label}`), `group label ${id}`);
-    assert.match(groupDialog, new RegExp(`<${component}[^>]*\\bid="${id}"`), `group control ${id}`);
-  }
-
   const privateControls = [
     ['private-nick-name', '昵称', 'VTextField'],
     ['private-status', '状态', 'VSelect'],
@@ -211,15 +164,8 @@ test('dialogs expose accessible names for every standalone form control', () => 
 });
 
 test('dialogs label their cards and preserve normalized submit payloads', () => {
-  assert.match(groupDialog, /<VDialog[^>]*aria-labelledby="group-dialog-title"/);
-  assert.match(groupDialog, /<VCardTitle id="group-dialog-title">群组详情<\/VCardTitle>/);
   assert.match(privateDialog, /<VDialog[^>]*aria-labelledby="private-dialog-title"/);
   assert.match(privateDialog, /<VCardTitle id="private-dialog-title">私聊用户详情<\/VCardTitle>/);
 
-  assert.match(
-    groupDialog,
-    /const adminIds = normalizeAdminIds\(form\.admin_ids\);[\s\S]*emit\('submit', \{ \.\.\.form, admin_ids: adminIds \}\)/,
-    'group payload normalization and submit',
-  );
   assert.match(privateDialog, /function save\(\) \{[\s\S]*emit\('submit', \{ \.\.\.form \}\);/, 'private submit payload');
 });

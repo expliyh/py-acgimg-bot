@@ -19,7 +19,6 @@ const drawer = ref<boolean | null>(null);
 const navItems = [
   { label: '仪表盘', icon: 'mdi-view-dashboard-outline', to: '/dashboard' },
   { label: '群组管理', icon: 'mdi-account-group-outline', to: '/groups' },
-  { label: '智能群管', icon: 'mdi-shield-account-outline', to: '/guard' },
   { label: '私聊管理', icon: 'mdi-message-processing-outline', to: '/private' },
   { label: '命令历史', icon: 'mdi-history', to: '/commands' },
   { label: '功能配置', icon: 'mdi-tune-variant', to: '/features' },

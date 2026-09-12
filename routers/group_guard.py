@@ -1,12 +1,12 @@
 """Administrative guard API. Deployment gateway authenticates /api and /admin."""
 
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import func, select
 from telegram.error import TelegramError
 
@@ -19,6 +19,7 @@ from models import (
 )
 from registries import engine
 from services.moderation import actions, reviews, store, worker
+from services import group_members
 from services.moderation.schemas import (
     ActionRequest,
     AIConfig,
@@ -44,6 +45,36 @@ router = APIRouter(
     dependencies=[Depends(ensure_group)],
 )
 model_router = APIRouter(prefix="/api/guard-ai", tags=["group-guard-ai"])
+
+
+class GroupMemberListItem(BaseModel):
+    """A member observed by the bot in this group."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    user_id: int
+    display_name: str | None
+    username: str | None
+    role: Literal["admin", "member"]
+    source: list[Literal["message", "admin", "moderation"]]
+    message_count: int
+    last_activity: datetime | None
+    warning_count: int
+    restriction_active: bool
+    exempt: bool
+    verification_state: str | None
+
+
+class GroupMemberListResponse(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    total: int
+    items: list[GroupMemberListItem]
+    page: int
+    page_size: int
+    pages: int
+    coverage: Literal["observed"]
+    telegram_member_count: int | None
 
 
 def bot():
@@ -137,6 +168,49 @@ async def delete_legacy(group_id: int, rule_id: int):
     from services import group_guard
 
     return {"removed": await group_guard.remove_keyword_rule(group_id, rule_id)}
+
+
+@router.get("/members", response_model=GroupMemberListResponse)
+async def list_members(
+    group_id: int,
+    q: str | None = Query(default=None, description="按用户 ID、用户名或显示名搜索"),
+    role: Literal["admin", "member"] | None = Query(default=None),
+    state: Literal["warned", "restricted", "exempt"] | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    sort_by: Literal["id", "display_name", "message_count", "last_activity"] = Query(
+        default="last_activity"
+    ),
+    sort_order: Literal["asc", "desc"] = Query(default="desc"),
+) -> GroupMemberListResponse:
+    """List members known to this bot without claiming Telegram full coverage."""
+
+    result = await group_members.list_observed_members(
+        group_id,
+        q=q,
+        role=role,
+        state=state,
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+
+    telegram_member_count: int | None = None
+    try:
+        value = await bot().get_chat_member_count(group_id)
+        if isinstance(value, int):
+            telegram_member_count = value
+    except (HTTPException, TelegramError):
+        # A member directory remains useful when Telegram is disconnected or
+        # temporarily unavailable.  The UI will hide the optional count.
+        pass
+
+    return GroupMemberListResponse(
+        **result,
+        coverage="observed",
+        telegram_member_count=telegram_member_count,
+    )
 
 
 @router.get("/members/{user_id}")

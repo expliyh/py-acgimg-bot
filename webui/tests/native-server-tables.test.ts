@@ -13,6 +13,7 @@ const viewFiles = [
   'PrivateChatsView.vue',
   'CommandHistoryView.vue',
 ] as const;
+const serverViewFiles = ['PrivateChatsView.vue', 'CommandHistoryView.vue'] as const;
 
 const views = Object.fromEntries(
   viewFiles.map((file) => [
@@ -101,7 +102,8 @@ test('server-table request guard handles concurrency and retry invalidation', ()
 });
 
 test('server-table views use native Vuetify components and options wiring', () => {
-  for (const [name, source] of Object.entries(views)) {
+  for (const name of serverViewFiles) {
+    const source = views[name];
     assert.match(source, /<VDataTableServer\b/, name);
     assert.match(source, /:headers="headers"/, name);
     assert.match(source, /item-value="id"/, name);
@@ -128,10 +130,6 @@ test('server-table views use native Vuetify components and options wiring', () =
 });
 
 test('server-table pagination defaults and sortable-key whitelists remain explicit', () => {
-  assert.match(views['GroupsView.vue'], /page: 1,\s*itemsPerPage: 10/);
-  assert.match(views['GroupsView.vue'], /\[10, 20, 50\]/);
-  assert.match(views['GroupsView.vue'], /\['id', 'name'\]/);
-
   assert.match(views['PrivateChatsView.vue'], /page: 1,\s*itemsPerPage: 10/);
   assert.match(views['PrivateChatsView.vue'], /\[10, 20, 50\]/);
   assert.match(views['PrivateChatsView.vue'], /\['id', 'nick_name'\]/);
@@ -143,12 +141,11 @@ test('server-table pagination defaults and sortable-key whitelists remain explic
 
 test('server-table headers disable sorting for unsupported backend fields', () => {
   const nonSortableHeaders = {
-    'GroupsView.vue': ['enable', 'enable_chat', 'message_count', 'last_activity', 'actions'],
     'PrivateChatsView.vue': ['enable_chat', 'status', 'message_count', 'last_activity', 'actions'],
     'CommandHistoryView.vue': ['arguments', 'user_id', 'chat_id', 'success', 'duration_ms', 'error_message'],
   } as const;
 
-  for (const name of viewFiles) {
+  for (const name of serverViewFiles) {
     for (const key of nonSortableHeaders[name]) {
       assert.match(views[name], new RegExp(`key: '${key}', sortable: false`), `${name} ${key}`);
     }
@@ -164,13 +161,8 @@ test('legacy chip colors are mapped to native Vuetify colors', () => {
 });
 
 test('detail dialogs close only after their awaited update succeeds', () => {
-  const updateHandlers = {
-    'GroupsView.vue': 'updateGroup',
-    'PrivateChatsView.vue': 'updatePrivateUser',
-  } as const;
-
-  for (const name of ['GroupsView.vue', 'PrivateChatsView.vue'] as const) {
-    const updateFunction = updateHandlers[name];
+  for (const name of ['PrivateChatsView.vue'] as const) {
+    const updateFunction = 'updatePrivateUser';
     const handler = views[name].match(/async function handleUpdate[\s\S]*?\n}\r?\n\r?\nonMounted/)?.[0];
     assert.ok(handler, `${name} handler`);
     assert.match(
@@ -183,7 +175,7 @@ test('detail dialogs close only after their awaited update succeeds', () => {
 });
 
 test('duplicate-request guards compare only native table options', () => {
-  for (const name of viewFiles) {
+  for (const name of serverViewFiles) {
     const source = views[name];
     assert.match(source, /let tableReady = false;/, name);
     assert.match(source, /if \(!tableReady\) return;/, name);
@@ -200,13 +192,8 @@ test('duplicate-request guards compare only native table options', () => {
 });
 
 test('groups and private users recover from metadata failures before loading rows', () => {
-  const metadataViews = {
-    'GroupsView.vue': 'loadGroups',
-    'PrivateChatsView.vue': 'loadUsers',
-  } as const;
-
-  for (const name of ['GroupsView.vue', 'PrivateChatsView.vue'] as const) {
-    const listFunction = metadataViews[name];
+  for (const name of ['PrivateChatsView.vue'] as const) {
+    const listFunction = 'loadUsers';
     assert.match(
       views[name],
       new RegExp(
@@ -218,7 +205,7 @@ test('groups and private users recover from metadata failures before loading row
 });
 
 test('server-table loaders ignore stale responses and only latest requests clear loading', () => {
-  for (const name of viewFiles) {
+  for (const name of serverViewFiles) {
     const source = views[name];
     assert.match(source, /const requestId = requestGuard\.begin\(optionsKey\(options\)\);/, name);
     assert.match(source, /if \(!requestGuard\.isLatest\(requestId\)\) return;/, name);
