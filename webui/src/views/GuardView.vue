@@ -28,6 +28,7 @@ import {
   cloneGuardPolicy,
 } from "@/utils/guard-policy";
 import { shouldRetainActionRequest } from "@/utils/guard-action";
+import { createRequestId } from "@/utils/request-id";
 import { useFeedback } from "@/composables/feedback";
 
 const route = useRoute();
@@ -582,7 +583,7 @@ async function perform() {
     };
     const fingerprint = JSON.stringify([groupId.value, payload]);
     if (pendingAction?.fingerprint !== fingerprint)
-      pendingAction = { fingerprint, requestId: crypto.randomUUID() };
+      pendingAction = { fingerprint, requestId: createRequestId() };
     actionResult.value = await guardApi.action(groupId.value, {
       ...payload,
       request_id: pendingAction!.requestId,
