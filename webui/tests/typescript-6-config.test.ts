@@ -4,7 +4,11 @@ import test from 'node:test';
 
 const packageJson = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-) as { scripts: Record<string, string> };
+) as {
+  scripts: Record<string, string>;
+  engines?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+};
 const tsconfig = JSON.parse(
   readFileSync(new URL('../tsconfig.json', import.meta.url), 'utf8'),
 ) as { compilerOptions: Record<string, unknown> };
@@ -17,4 +21,6 @@ test('TypeScript 6 uses Vite-compatible module resolution without deprecated bas
   assert.equal(tsconfig.compilerOptions.baseUrl, undefined);
   assert.equal(nodeTsconfig.compilerOptions.moduleResolution, 'Bundler');
   assert.match(packageJson.scripts.typecheck, /--skipLibCheck/);
+  assert.equal(packageJson.engines?.node, '>=22.12.0');
+  assert.match(packageJson.devDependencies?.typescript ?? '', /^\^6\./);
 });
