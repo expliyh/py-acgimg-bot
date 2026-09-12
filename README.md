@@ -2,6 +2,8 @@
 
 该项目提供 FastAPI 后端与基于 Vuetify（Material 3）的管理控制台。要在本地运行完整的控制台体验，请按以下步骤操作：
 
+WebAdmin 前端要求 Node.js `>=22.12.0`（Docker 构建阶段使用 Node 24）。依赖由 `webui/package-lock.json` 锁定；日常安装请使用 `npm ci`，修改依赖时重新生成并提交 lockfile。TypeScript 暂固定在 6.x，以保持与当前 `vue-tsc` 的兼容性。
+
 1. 安装 Python 依赖并启动 FastAPI 后端：
    ```bash
    uvicorn main:app
@@ -9,7 +11,7 @@
 2. 安装前端依赖并启动开发服务器：
    ```bash
    cd webui
-   npm install
+   npm ci
    npm run dev
    ```
    开发服务器默认运行在 `http://localhost:5173/admin/`，已通过 Vite 代理自动代理到 FastAPI 的 `/api` 路由。

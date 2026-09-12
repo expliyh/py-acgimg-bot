@@ -1,0 +1,49 @@
+name: WebUI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  webui:
+    name: WebUI (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22.12.x', '24.x']
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify dependency tree
+        run: npm ls --depth=0
+
+      - name: Typecheck application
+        run: npm run typecheck
+
+      - name: Typecheck tests
+        run: npm run test:typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build production assets
+        run: npm run build

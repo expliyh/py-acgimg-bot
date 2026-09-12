@@ -161,7 +161,7 @@ async def _watch_startup(proc: asyncio.subprocess.Process | subprocess.Popen[byt
     if proc.returncode != 0:
         logger.warning(
             "Frontend dev server exited early with code %s "
-            "(is port %s in use? run `npm install` inside webui/)",
+            "(is port %s in use? run `npm ci` inside webui/)",
             proc.returncode,
             DEFAULT_PORT,
         )
