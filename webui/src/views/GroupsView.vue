@@ -261,17 +261,15 @@ onMounted(async () => {
                 <h2 class="text-h5 font-weight-bold ma-0">{{ detail.name || '未命名群组' }}</h2>
                 <VChip size="small" :color="detail.enable ? 'success' : 'error'">{{ detail.enable ? '已启用' : '已停用' }}</VChip>
                 <VChip size="small" :color="detail.enable_chat ? 'info' : 'warning'">聊天 {{ detail.enable_chat ? '开放' : '关闭' }}</VChip>
+                <VChip size="small" color="primary" variant="tonal">消息 {{ detail.message_count }}</VChip>
+                <VChip size="small" color="secondary" variant="tonal">管理员 {{ detail.admin_ids.length }}</VChip>
+                <VChip size="small" color="info" variant="tonal">聊天模式 {{ detail.chat_mode || '默认' }}</VChip>
               </div>
               <p class="text-caption text-medium-emphasis mb-0 mt-1">{{ detail.id }} · 最后活跃 {{ detail.last_activity ? new Date(detail.last_activity).toLocaleString() : '暂无' }}</p>
             </div>
             <VBtn icon="mdi-refresh" variant="text" aria-label="刷新群组详情" :loading="detailLoading" @click="loadDetail(detail.id)" />
           </VCardTitle>
           <VCardText>
-            <div class="d-flex ga-2 flex-wrap mb-4">
-              <VChip color="primary" variant="tonal">消息 {{ detail.message_count }}</VChip>
-              <VChip color="secondary" variant="tonal">管理员 {{ detail.admin_ids.length }}</VChip>
-              <VChip color="info" variant="tonal">聊天模式 {{ detail.chat_mode || '默认' }}</VChip>
-            </div>
             <VTabs v-model="activeWorkspace" show-arrows color="primary" class="mb-4">
               <VTab value="overview">概览</VTab>
               <VTab value="base">基础配置</VTab>

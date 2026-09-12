@@ -25,6 +25,14 @@ test('group management is the canonical unified workspace', () => {
   assert.doesNotMatch(app, /label: '智能群管'/);
 });
 
+test('group detail metadata chips share the title row instead of adding a second strip above tabs', () => {
+  assert.match(
+    groups,
+    /<h2 class="text-h5 font-weight-bold ma-0">[\s\S]*?<VChip size="small" color="primary" variant="tonal">消息[\s\S]*?<\/div>\s*<p class="text-caption/s,
+  );
+  assert.doesNotMatch(groups, /<VCardText>\s*<div class="d-flex ga-2 flex-wrap mb-4">[\s\S]*?消息 \{\{ detail\.message_count \}\}/);
+});
+
 test('member workspace identifies observed coverage and uses guarded actions', () => {
   assert.match(guard, /guardApi\.members\(id,/);
   assert.match(guard, /<VDataTableServer[\s\S]*item-value="user_id"/);
