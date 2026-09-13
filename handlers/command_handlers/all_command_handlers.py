@@ -5,6 +5,7 @@ from handlers.registry import iter_bot_handlers
 # Import modules for side effects so their handlers register before aggregation.
 from . import (
     add_pixiv_handler,
+    image_push_handler,
     add_manual_handler,
     admin_handler,
     group_guard_handler,

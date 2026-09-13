@@ -1,22 +1,21 @@
 ﻿from __future__ import annotations
 
 import logging
-from io import BytesIO
 from typing import Sequence
 
 from telegram import Update
-from telegram.error import TelegramError, TimedOut
+from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
 from defines import GroupStatus, UserStatus
 from exps import UserBlockedError, GroupBlockedError
 
-from utils import is_group_type, ensure_list_length
+from utils import is_group_type
 
 from registries import user_registry, group_registry, illust_registry
 from services.command_history import command_logger
 from services.image_service import ImageResource, get_image_resource
-from services.storage_service import use as use_storage
+from services.image_push import send_illustration_photo
 from services.original_image_manager import (
     OriginalImageRequest,
     create_request,
@@ -187,59 +186,18 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if request_state is not None:
         send_kwargs["reply_markup"] = request_state.build_markup()
 
-    sent_message = None
-    if resource.file_id:
-        try:
-            sent_message = await context.bot.send_photo(photo=resource.file_id, **send_kwargs)
-        except TimedOut as exc:
-            # 请求超时但消息可能已送达，不重发避免重复
-            logger.warning(
-                "send_photo timed out (message may have been delivered): %s", exc
-            )
-            return
-        except TelegramError as exc:
-            logger.warning("Failed to reuse cached photo %s: %s", resource.file_id, exc)
-            ids = ensure_list_length(getattr(illust, "compressed_file_ids", None), illust.page_count)
-            if ids[resource.page_id] == resource.file_id:
-                ids[resource.page_id] = None
-                illust.compressed_file_ids = ids
-                await illust_registry.save_illustration(illust)
-        else:
-            if request_state is not None:
-                request_state.message_id = sent_message.id
-                await register_request(context.bot, request_state)
-            return
-
-    file_bytes = await resource.fetcher(resource.filename, resource.link)
-
-    storage = await use_storage()
-    if storage is not None:
-        file_urls = ensure_list_length(getattr(illust, "file_urls", None), illust.page_count)
-        existing_url = file_urls[resource.page_id]
-        if not existing_url:
-            storage_folder = storage.join_path("pixiv", str(illust.id))
-            try:
-                storage_url = await storage.upload(
-                    file_bytes,
-                    resource.filename,
-                    sub_folder=storage_folder,
-                )
-            except Exception as exc:
-                logger.warning("Failed to upload image to storage: %s", exc)
-            else:
-                file_urls[resource.page_id] = storage_url
-                illust.file_urls = file_urls
-                try:
-                    await illust_registry.save_illustration(illust)
-                except Exception as exc:
-                    logger.warning("Failed to persist storage URL for illustration %s: %s", illust.id, exc)
-
-    image_file = BytesIO(file_bytes)
-    image_file.name = resource.filename
     try:
-        sent_message = await context.bot.send_photo(photo=image_file, **send_kwargs)
+        sent_message = await send_illustration_photo(
+            context.bot,
+            chat_id,
+            illust,
+            resource.page_id,
+            caption=send_kwargs["caption"],
+            reply_to_message_id=send_kwargs.get("reply_to_message_id"),
+            reply_markup=send_kwargs.get("reply_markup"),
+        )
     except TimedOut as exc:
-        # 请求超时但消息可能已送达，不重发避免重复
+        # 请求超时但消息可能已送达，不重发避免重复。
         logger.warning(
             "send_photo timed out (message may have been delivered): %s", exc
         )
@@ -248,19 +206,3 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if request_state is not None:
         request_state.message_id = sent_message.id
         await register_request(context.bot, request_state)
-
-    photo_sizes = sent_message.photo or []
-    if not photo_sizes:
-        return
-
-    cached_id = photo_sizes[-1].file_id
-    if not cached_id:
-        return
-
-    ids = ensure_list_length(getattr(illust, "compressed_file_ids", None), illust.page_count)
-    if ids[resource.page_id] == cached_id:
-        return
-
-    ids[resource.page_id] = cached_id
-    illust.compressed_file_ids = ids
-    await illust_registry.save_illustration(illust)

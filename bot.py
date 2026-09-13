@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 BOT_COMMAND_DEFINITIONS: list[tuple[str, str]] = [
     ("start", "\u5f00\u59cb\u4f7f\u7528\u673a\u5668\u4eba"),
     ("setu", "\u53d1\u9001\u968f\u673a\u6da9\u56fe"),
+    ("push", "\u7ba1\u7406\u5458\u4e3b\u52a8\u63a8\u9001\u56fe\u7247"),
     ("option", "\u6253\u5f00\u4e2a\u4eba\u8bbe\u7f6e"),
     ("admin", "\u6253\u5f00\u7ba1\u7406\u9762\u677f"),
     ("pinfo", "\u67e5\u770b Pixiv \u63d2\u753b\u4fe1\u606f"),
@@ -41,6 +42,7 @@ class TelegramBot:
         self._mode: Literal["webhook", "polling"] | None = None
         self._app_initialized = False
         self._guard_worker = None
+        self._image_push_worker = None
         self._lifecycle_lock = asyncio.Lock()
 
     async def config(self):
@@ -101,6 +103,9 @@ class TelegramBot:
         from services.moderation.worker import Worker
         self._guard_worker = Worker(self.tg_bot)
         await self._guard_worker.start()
+        from services.image_push import ImagePushWorker
+        self._image_push_worker = ImagePushWorker(self.tg_bot)
+        await self._image_push_worker.start()
 
         await self._register_commands()
 
@@ -130,6 +135,9 @@ class TelegramBot:
         if self._guard_worker:
             await self._guard_worker.stop()
             self._guard_worker = None
+        if self._image_push_worker:
+            await self._image_push_worker.stop()
+            self._image_push_worker = None
         if self.tg_app:
             if self.tg_app.updater and self.tg_app.updater.running:
                 with suppress(Exception):

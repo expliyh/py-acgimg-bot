@@ -1,6 +1,6 @@
 """FastAPI router registrations for the administrative API."""
 
-from . import dashboard, groups, private, configs, commands
+from . import dashboard, groups, private, configs, commands, image_push
 
 __all__ = [
     "dashboard",
@@ -8,4 +8,5 @@ __all__ = [
     "private",
     "configs",
     "commands",
+    "image_push",
 ]

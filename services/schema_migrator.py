@@ -358,7 +358,30 @@ async def _add_guard_verification_completion_time(conn: AsyncConnection) -> None
     )
 
 
+async def _add_image_push_tables(conn: AsyncConnection) -> None:
+    """Create image-push tables for installations upgraded in place.
+
+    ``main`` already calls ``Base.metadata.create_all`` before migrations, but
+    keeping the table creation in the versioned migrator also covers older
+    deployments that run migrations independently.
+    """
+
+    from models import Base, ImagePushBatch, ImagePushDelivery, ImagePushPlan
+
+    await conn.run_sync(
+        lambda sync_conn: Base.metadata.create_all(
+            sync_conn,
+            tables=[
+                ImagePushPlan.__table__,
+                ImagePushBatch.__table__,
+                ImagePushDelivery.__table__,
+            ],
+        )
+    )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
+    Migration(8, "Add durable image push plans and delivery receipts", _add_image_push_tables),
     Migration(7, "Add Telegram username lookup", _add_user_username),
     Migration(
         6, "Track verification terminal transitions", _add_guard_verification_completion_time

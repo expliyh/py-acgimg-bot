@@ -160,3 +160,29 @@ async def get_image_resource(
         link=link,
         is_original=False,
     )
+
+
+def resource_for_illustration(
+    illust: Illustration, page_id: int | None = None
+) -> ImageResource:
+    """Build a compressed-image resource for an already loaded illustration.
+
+    Push jobs may select manually uploaded illustrations as well as Pixiv
+    records.  Keeping this resolver next to ``get_image_resource`` means both
+    paths use the same cached file-id and URL fallback rules.
+    """
+
+    resolved_page_id = _resolve_page_id(illust, page_id, allow_random=page_id is None)
+    link = _resolve_link(illust, resolved_page_id)
+    ext = _resolve_extension(illust, resolved_page_id, link)
+    filename = f"{illust.id}_{resolved_page_id}{ext}"
+    return ImageResource(
+        illustration=illust,
+        page_id=resolved_page_id,
+        filename=filename,
+        image_bytes=None,
+        fetcher=file_service.get_image,
+        file_id=_resolve_file_id(illust, resolved_page_id, origin=False),
+        link=link,
+        is_original=False,
+    )
