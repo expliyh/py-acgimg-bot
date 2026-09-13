@@ -24,7 +24,8 @@ const navItems = [
   { label: '功能配置', icon: 'mdi-tune-variant', to: '/features' },
   { label: 'Bot Token', icon: 'mdi-key-outline', to: '/bot-tokens' },
   { label: 'Pixiv Token', icon: 'mdi-palette-outline', to: '/pixiv-tokens' },
-  { label: '插画导入', icon: 'mdi-image-plus-outline', to: '/illustrations/import' }
+  { label: '插画导入', icon: 'mdi-image-plus-outline', to: '/illustrations/import' },
+  { label: '图片推送', icon: 'mdi-send-check-outline', to: '/image-push' }
 ];
 const activePath = computed(() => route.path);
 const dark = computed(() => theme.global.current.value.dark);

@@ -24,6 +24,7 @@ from routers import (
     bot_tokens,
     pixiv_tokens,
     illustrations,
+    image_push,
 )
 import uvicorn
 
@@ -137,6 +138,7 @@ for router in (
     bot_tokens.router,
     pixiv_tokens.router,
     illustrations.router,
+    image_push.router,
 ):
     app.include_router(router)
 

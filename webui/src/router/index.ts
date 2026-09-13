@@ -58,6 +58,11 @@ const router = createRouter({
       component: () => import('@/views/IllustrationImportView.vue')
     },
     {
+      path: '/image-push',
+      name: 'image-push',
+      component: () => import('@/views/ImagePushView.vue')
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/dashboard'
     }
