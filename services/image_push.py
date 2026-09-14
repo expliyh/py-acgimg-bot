@@ -454,7 +454,7 @@ def _page_index(illust: Illustration, requested_page: int | None) -> int:
     return requested_page - 1
 
 
-def _pixiv_metadata_lines(illust: Illustration, image_link: str) -> list[str]:
+def _pixiv_metadata_lines(illust: Illustration) -> list[str]:
     """Return source metadata to show below a Pixiv image caption.
 
     Manually uploaded illustrations use the same send pipeline as Pixiv
@@ -466,25 +466,25 @@ def _pixiv_metadata_lines(illust: Illustration, image_link: str) -> list[str]:
     source_type = getattr(illust, "source_type", None)
     if source_type not in (None, "pixiv"):
         return []
-    return [f"PID: {illust.id}", f"图片链接: {image_link}"]
+    artwork_url = f"https://www.pixiv.net/artworks/{illust.id}"
+    return [f"PID: {illust.id}", f"图片链接: {artwork_url}"]
 
 
-def _caption(illust: Illustration, page: int, *, image_link: str | None = None) -> str:
+def _caption(illust: Illustration, page: int) -> str:
     lines = [
         f"标题: {illust.title or illust.id}",
         f"作者: {illust.author_name or '未知'} (Pixiv {illust.author_id})",
         f"页码: {page + 1}/{illust.page_count}",
         f"AI 作品: {'是' if illust.is_ai else '否'}",
     ]
-    if image_link:
-        lines.extend(_pixiv_metadata_lines(illust, image_link))
+    lines.extend(_pixiv_metadata_lines(illust))
     return "\n".join(lines)
 
 
 def _with_pixiv_metadata(
-    caption: str, illust: Illustration, image_link: str
+    caption: str, illust: Illustration
 ) -> str:
-    metadata = _pixiv_metadata_lines(illust, image_link)
+    metadata = _pixiv_metadata_lines(illust)
     if not metadata:
         return caption
     return "\n".join([caption, *metadata])
@@ -504,9 +504,9 @@ async def send_illustration_photo(
 
     resource = resource_for_illustration(illust, page)
     message_caption = (
-        _caption(illust, page, image_link=resource.link)
+        _caption(illust, page)
         if caption is None
-        else _with_pixiv_metadata(caption, illust, resource.link)
+        else _with_pixiv_metadata(caption, illust)
     )
     kwargs: dict[str, Any] = {
         "chat_id": group_id,

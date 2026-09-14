@@ -30,21 +30,16 @@ def _illustration(*, source_type: str = "pixiv") -> Illustration:
 
 
 def test_default_caption_includes_pixiv_pid_and_page_link():
-    caption = _caption(
-        _illustration(),
-        1,
-        image_link="https://storage.example/123456-1.jpg",
-    )
+    caption = _caption(_illustration(), 1)
 
     assert "PID: 123456" in caption
-    assert "图片链接: https://storage.example/123456-1.jpg" in caption
+    assert "图片链接: https://www.pixiv.net/artworks/123456" in caption
 
 
 def test_manual_caption_does_not_include_pixiv_metadata():
     caption = _caption(
         _illustration(source_type="manual"),
         0,
-        image_link="https://storage.example/manual.jpg",
     )
 
     assert "PID:" not in caption
@@ -60,5 +55,5 @@ async def test_custom_caption_is_augmented_before_photo_is_sent():
     sent_kwargs = bot.send_photo.await_args.kwargs
     assert sent_kwargs["caption"] == (
         "自定义说明\nPID: 123456\n"
-        "图片链接: https://storage.example/123456-1.jpg"
+        "图片链接: https://www.pixiv.net/artworks/123456"
     )
