@@ -454,15 +454,40 @@ def _page_index(illust: Illustration, requested_page: int | None) -> int:
     return requested_page - 1
 
 
-def _caption(illust: Illustration, page: int) -> str:
-    return "\n".join(
-        [
-            f"标题: {illust.title or illust.id}",
-            f"作者: {illust.author_name or '未知'} (Pixiv {illust.author_id})",
-            f"页码: {page + 1}/{illust.page_count}",
-            f"AI 作品: {'是' if illust.is_ai else '否'}",
-        ]
-    )
+def _pixiv_metadata_lines(illust: Illustration, image_link: str) -> list[str]:
+    """Return source metadata to show below a Pixiv image caption.
+
+    Manually uploaded illustrations use the same send pipeline as Pixiv
+    illustrations, but their IDs are internal values rather than Pixiv PIDs.
+    Keep the metadata limited to actual Pixiv records so those images are not
+    presented with misleading source information.
+    """
+
+    source_type = getattr(illust, "source_type", None)
+    if source_type not in (None, "pixiv"):
+        return []
+    return [f"PID: {illust.id}", f"图片链接: {image_link}"]
+
+
+def _caption(illust: Illustration, page: int, *, image_link: str | None = None) -> str:
+    lines = [
+        f"标题: {illust.title or illust.id}",
+        f"作者: {illust.author_name or '未知'} (Pixiv {illust.author_id})",
+        f"页码: {page + 1}/{illust.page_count}",
+        f"AI 作品: {'是' if illust.is_ai else '否'}",
+    ]
+    if image_link:
+        lines.extend(_pixiv_metadata_lines(illust, image_link))
+    return "\n".join(lines)
+
+
+def _with_pixiv_metadata(
+    caption: str, illust: Illustration, image_link: str
+) -> str:
+    metadata = _pixiv_metadata_lines(illust, image_link)
+    if not metadata:
+        return caption
+    return "\n".join([caption, *metadata])
 
 
 async def send_illustration_photo(
@@ -478,9 +503,14 @@ async def send_illustration_photo(
     """Send one page and persist the Telegram compressed photo file id."""
 
     resource = resource_for_illustration(illust, page)
+    message_caption = (
+        _caption(illust, page, image_link=resource.link)
+        if caption is None
+        else _with_pixiv_metadata(caption, illust, resource.link)
+    )
     kwargs: dict[str, Any] = {
         "chat_id": group_id,
-        "caption": caption if caption is not None else _caption(illust, page),
+        "caption": message_caption,
     }
     if reply_to_message_id is not None:
         kwargs["reply_to_message_id"] = reply_to_message_id
