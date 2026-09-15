@@ -53,6 +53,11 @@ const router = createRouter({
       component: () => import('@/views/PixivTokensView.vue')
     },
     {
+      path: '/illustrations',
+      name: 'illustrations',
+      component: () => import('@/views/IllustrationGalleryView.vue')
+    },
+    {
       path: '/illustrations/import',
       name: 'illustration-import',
       component: () => import('@/views/IllustrationImportView.vue')

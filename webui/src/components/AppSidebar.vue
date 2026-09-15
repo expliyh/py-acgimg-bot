@@ -1,7 +1,16 @@
 <script setup lang="ts">
 interface NavItem { label: string; icon: string; to: string }
-defineProps<{ items: NavItem[]; activePath: string }>();
+const props = defineProps<{ items: NavItem[]; activePath: string }>();
 const emit = defineEmits<{ (e: 'navigate'): void }>();
+
+function isActive(item: NavItem): boolean {
+  // Prefer an exact item when a route has a more specific sibling (for
+  // example /illustrations/import); nested group routes still highlight the
+  // /groups entry when there is no exact navigation item.
+  const exact = props.items.find((candidate) => props.activePath === candidate.to);
+  if (exact) return exact.to === item.to;
+  return props.activePath.startsWith(`${item.to}/`);
+}
 </script>
 
 <template>
@@ -10,7 +19,7 @@ const emit = defineEmits<{ (e: 'navigate'): void }>();
     <v-list-item
       v-for="item in items"
       :key="item.to"
-      :active="activePath.startsWith(item.to)"
+      :active="isActive(item)"
       color="primary"
       rounded="lg"
       :to="item.to"
