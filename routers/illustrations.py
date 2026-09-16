@@ -7,11 +7,20 @@ user review/adjust fields, then confirm to download + store + persist.
 from __future__ import annotations
 
 import os
-from urllib.parse import urlsplit, urlunsplit
+from typing import Literal
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiohttp
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from datetime import datetime
 
@@ -21,9 +30,22 @@ from registries import illust_registry
 from services import pixiv
 from services.illustration_import_runner import (
     create_import_task,
+    create_refresh_tasks,
     get_import_task,
     list_import_tasks,
 )
+from services.illustration_fields import normalize_tags
+from services.illustration_gallery import (
+    DeleteResult,
+    IllustrationBusyError,
+    IllustrationNotFoundError,
+    bulk_update_illustrations,
+    delete_illustrations,
+    get_illustration,
+    list_illustrations,
+    update_illustration,
+)
+from services.illustration_media import MediaAccessError, read_media_url
 from services.manual_illustration_importer import (
     MAX_IMAGE_BYTES,
     import_manual_illustration,
@@ -331,3 +353,380 @@ async def proxy_image(url: str) -> Response:
         raise HTTPException(status_code=502, detail=f"获取图片失败：{exc}")
 
     return Response(content=content, media_type=_guess_media_type(parsed.path))
+
+
+# ---------------------------------------------------------------------------
+# Gallery / catalogue management API
+# ---------------------------------------------------------------------------
+
+
+class IllustrationPageResponse(BaseModel):
+    index: int
+    media_url: str
+    has_storage_url: bool
+
+
+class IllustrationListItem(BaseModel):
+    id: str
+    title: str | None
+    source_type: str
+    author_id: str
+    author_name: str | None
+    page_count: int
+    sanity_level: int
+    r18g: bool
+    x_restrict: int
+    is_ai: bool
+    tags: list[str]
+    thumbnail_url: str | None
+    has_media: bool
+
+
+class IllustrationDetail(IllustrationListItem):
+    caption: str | None
+    source_url: str | None
+    author_url: str | None
+    pages: list[IllustrationPageResponse]
+
+
+class IllustrationListResponse(BaseModel):
+    total: int
+    items: list[IllustrationListItem]
+    page: int
+    page_size: int
+    pages: int
+
+
+class IllustrationUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=64)
+    author_name: str | None = Field(default=None, max_length=64)
+    author_url: str | None = Field(default=None, max_length=2048)
+    source_url: str | None = Field(default=None, max_length=2048)
+    caption: str | None = Field(default=None, max_length=20000)
+    tags: list[str] | None = Field(default=None, max_length=100)
+    sanity_level: StrictInt = Field(default=5, ge=0, le=10)
+    x_restrict: StrictInt = Field(default=0, ge=0, le=2)
+    r18g: StrictBool = False
+    is_ai: StrictBool = False
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        normalized: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if len(text) > 64:
+                raise ValueError("单个标签不能超过 64 个字符")
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized
+
+    @model_validator(mode="after")
+    def require_a_field(self) -> "IllustrationUpdatePayload":
+        if not self.model_fields_set:
+            raise ValueError("至少提供一个需要修改的字段")
+        return self
+
+
+class IllustrationIdsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+    @field_validator("ids")
+    @classmethod
+    def normalize_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            item = str(raw).strip()
+            if not item or len(item) > 20 or "/" in item or "\\" in item:
+                raise ValueError("插画 ID 无效")
+            if item not in seen:
+                seen.add(item)
+                normalized.append(item)
+        if not normalized:
+            raise ValueError("至少选择一张图片")
+        return normalized
+
+
+class IllustrationBulkUpdatePayload(IllustrationIdsPayload):
+    patch: IllustrationUpdatePayload
+
+
+class IllustrationCleanupFailureResponse(BaseModel):
+    illustration_id: str
+    page: int
+    error: str
+
+
+class IllustrationDeleteResponse(BaseModel):
+    removed: bool
+    removed_ids: list[str]
+    deleted_urls: int
+    shared_urls: int
+    cleanup_failures: list[IllustrationCleanupFailureResponse]
+
+
+class IllustrationBulkUpdateResponse(BaseModel):
+    updated_ids: list[str]
+
+
+class IllustrationRefreshBatchResponse(BaseModel):
+    tasks: list[IllustrationImportTaskResponse]
+
+
+def _illustration_media_url(illustration_id: str, page: int) -> str:
+    return f"/api/illustrations/{quote(str(illustration_id), safe='')}/pages/{page}/media"
+
+
+def _storage_pages(illust: Illustration) -> list[str | None]:
+    raw = illust.file_urls
+    if isinstance(raw, list):
+        values = raw
+    elif isinstance(raw, str):
+        values = [raw]
+    else:
+        values = []
+    count = max(int(illust.page_count or 0), 0)
+    return [
+        value.strip() if isinstance(value, str) and value.strip() else None
+        for value in (values[:count] + [None] * max(0, count - len(values)))
+    ]
+
+
+def _illustration_list_item(illust: Illustration) -> IllustrationListItem:
+    pages = _storage_pages(illust)
+    # The first stored page is the canonical cover.  Do not silently promote a
+    # later page when page zero is missing; the UI should show the missing-media
+    # placeholder and make the data problem visible.
+    has_cover = bool(pages and pages[0])
+    return IllustrationListItem(
+        id=str(illust.id),
+        title=illust.title,
+        source_type=str(getattr(illust, "source_type", "pixiv") or "pixiv"),
+        author_id=str(illust.author_id),
+        author_name=illust.author_name,
+        page_count=max(int(illust.page_count or 0), 0),
+        sanity_level=int(illust.sanity_level),
+        r18g=bool(illust.r18g),
+        x_restrict=int(illust.x_restrict),
+        is_ai=bool(illust.is_ai),
+        tags=normalize_tags(illust.tags),
+        thumbnail_url=(
+            _illustration_media_url(str(illust.id), 0)
+            if has_cover
+            else None
+        ),
+        has_media=any(pages),
+    )
+
+
+def _illustration_detail(illust: Illustration) -> IllustrationDetail:
+    base = _illustration_list_item(illust)
+    pages = _storage_pages(illust)
+    return IllustrationDetail(
+        **base.model_dump(),
+        caption=illust.caption,
+        source_url=getattr(illust, "source_url", None),
+        author_url=getattr(illust, "author_url", None),
+        pages=[
+            IllustrationPageResponse(
+                index=index,
+                media_url=_illustration_media_url(str(illust.id), index),
+                has_storage_url=bool(value),
+            )
+            for index, value in enumerate(pages)
+        ],
+    )
+
+
+def _delete_response(result: DeleteResult) -> IllustrationDeleteResponse:
+    return IllustrationDeleteResponse(
+        removed=True,
+        removed_ids=result.removed_ids,
+        deleted_urls=result.deleted_urls,
+        shared_urls=result.shared_urls,
+        cleanup_failures=[
+            IllustrationCleanupFailureResponse(
+                illustration_id=failure.illustration_id,
+                page=failure.page,
+                error=failure.error,
+            )
+            for failure in result.failures
+        ],
+    )
+
+
+@router.get("", response_model=IllustrationListResponse)
+async def list_illustrations_endpoint(
+    q: str | None = Query(default=None),
+    source_type: Literal["pixiv", "manual"] | None = Query(default=None),
+    r18g: bool | None = Query(default=None),
+    is_ai: bool | None = Query(default=None),
+    x_restrict: int | None = Query(default=None, ge=0, le=2),
+    sanity_min: int | None = Query(default=None, ge=0, le=10),
+    sanity_max: int | None = Query(default=None, ge=0, le=10),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=24, ge=1, le=100),
+    sort_by: str = Query(default="id"),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
+) -> IllustrationListResponse:
+    if sanity_min is not None and sanity_max is not None and sanity_min > sanity_max:
+        raise HTTPException(status_code=422, detail="分级范围无效：最小值不能大于最大值")
+    try:
+        total, rows = await list_illustrations(
+            limit=page_size,
+            offset=page_offset(page, page_size),
+            q=q.strip() if q else None,
+            source_type=source_type,
+            r18g=r18g,
+            is_ai=is_ai,
+            x_restrict=x_restrict,
+            sanity_min=sanity_min,
+            sanity_max=sanity_max,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    meta = page_meta(total, page, page_size)
+    return IllustrationListResponse(
+        items=[_illustration_list_item(row) for row in rows],
+        **meta.model_dump(),
+    )
+
+
+@router.post("/bulk/update", response_model=IllustrationBulkUpdateResponse)
+async def bulk_update_illustrations_endpoint(
+    payload: IllustrationBulkUpdatePayload,
+) -> IllustrationBulkUpdateResponse:
+    try:
+        updated_ids = await bulk_update_illustrations(
+            payload.ids,
+            payload.patch.model_dump(exclude_unset=True),
+        )
+    except IllustrationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except IllustrationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return IllustrationBulkUpdateResponse(updated_ids=updated_ids)
+
+
+@router.post("/bulk/delete", response_model=IllustrationDeleteResponse)
+async def bulk_delete_illustrations_endpoint(
+    payload: IllustrationIdsPayload,
+) -> IllustrationDeleteResponse:
+    try:
+        result = await delete_illustrations(payload.ids)
+    except IllustrationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except IllustrationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _delete_response(result)
+
+
+@router.post("/bulk/refresh", response_model=IllustrationRefreshBatchResponse)
+async def bulk_refresh_illustrations_endpoint(
+    payload: IllustrationIdsPayload,
+) -> IllustrationRefreshBatchResponse:
+    if not pixiv.enabled:
+        raise HTTPException(status_code=400, detail="Pixiv 功能未启用，请先配置有效的 Pixiv Token")
+    try:
+        tasks = await create_refresh_tasks(payload.ids)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return IllustrationRefreshBatchResponse(tasks=[_task_to_response(task) for task in tasks])
+
+
+@router.post("/{illustration_id}/refresh", response_model=IllustrationImportTaskResponse)
+async def refresh_illustration_endpoint(
+    illustration_id: str,
+) -> IllustrationImportTaskResponse:
+    if not pixiv.enabled:
+        raise HTTPException(status_code=400, detail="Pixiv 功能未启用，请先配置有效的 Pixiv Token")
+    try:
+        tasks = await create_refresh_tasks([illustration_id])
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _task_to_response(tasks[0])
+
+
+@router.get("/{illustration_id}/pages/{page}/media")
+async def illustration_media_endpoint(illustration_id: str, page: int) -> Response:
+    illust = await get_illustration(illustration_id)
+    if illust is None:
+        raise HTTPException(status_code=404, detail=f"插画 {illustration_id} 不存在")
+    if page < 0 or page >= int(illust.page_count or 0):
+        raise HTTPException(status_code=404, detail="请求的页码不存在")
+    urls = _storage_pages(illust)
+    stored_url = urls[page] if page < len(urls) else None
+    if not stored_url:
+        raise HTTPException(status_code=404, detail="该页面没有可用的存储图片")
+    try:
+        media = await read_media_url(stored_url)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="存储图片不存在") from exc
+    except (MediaAccessError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"读取存储图片失败：{exc}") from exc
+    return Response(
+        content=media.data,
+        media_type=media.media_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+@router.get("/{illustration_id}", response_model=IllustrationDetail)
+async def get_illustration_endpoint(illustration_id: str) -> IllustrationDetail:
+    illust = await get_illustration(illustration_id)
+    if illust is None:
+        raise HTTPException(status_code=404, detail=f"插画 {illustration_id} 不存在")
+    return _illustration_detail(illust)
+
+
+@router.patch("/{illustration_id}", response_model=IllustrationDetail)
+async def update_illustration_endpoint(
+    illustration_id: str,
+    payload: IllustrationUpdatePayload,
+) -> IllustrationDetail:
+    try:
+        updated = await update_illustration(
+            illustration_id,
+            payload.model_dump(exclude_unset=True),
+        )
+    except IllustrationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except IllustrationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _illustration_detail(updated)
+
+
+@router.delete("/{illustration_id}", response_model=IllustrationDeleteResponse)
+async def delete_illustration_endpoint(illustration_id: str) -> IllustrationDeleteResponse:
+    try:
+        result = await delete_illustrations([illustration_id])
+    except IllustrationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except IllustrationBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _delete_response(result)

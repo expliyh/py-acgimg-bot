@@ -299,6 +299,99 @@ export interface ManualIllustrationResult {
   storage_url: string;
 }
 
+export type IllustrationSourceType = 'pixiv' | 'manual';
+
+export interface IllustrationListItem {
+  id: string;
+  title: string | null;
+  source_type: IllustrationSourceType;
+  author_id: string;
+  author_name: string | null;
+  page_count: number;
+  sanity_level: number;
+  r18g: boolean;
+  x_restrict: number;
+  is_ai: boolean;
+  tags: string[];
+  thumbnail_url: string | null;
+  has_media: boolean;
+}
+
+export interface IllustrationPage {
+  index: number;
+  media_url: string;
+  has_storage_url: boolean;
+}
+
+export interface IllustrationDetail extends IllustrationListItem {
+  caption: string | null;
+  source_url: string | null;
+  author_url: string | null;
+  pages: IllustrationPage[];
+}
+
+export interface IllustrationListResponse {
+  total: number;
+  items: IllustrationListItem[];
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
+export interface IllustrationListQuery {
+  q?: string;
+  source_type?: IllustrationSourceType;
+  r18g?: boolean;
+  is_ai?: boolean;
+  x_restrict?: number;
+  sanity_min?: number;
+  sanity_max?: number;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
+export interface IllustrationUpdatePayload {
+  title?: string | null;
+  author_name?: string | null;
+  author_url?: string | null;
+  source_url?: string | null;
+  caption?: string | null;
+  tags?: string[] | null;
+  sanity_level?: number | null;
+  x_restrict?: number | null;
+  r18g?: boolean | null;
+  is_ai?: boolean | null;
+}
+
+export interface IllustrationBulkUpdatePayload {
+  ids: string[];
+  patch: IllustrationUpdatePayload;
+}
+
+export interface IllustrationBulkUpdateResponse {
+  updated_ids: string[];
+}
+
+export interface IllustrationCleanupFailure {
+  illustration_id: string;
+  page: number;
+  error: string;
+}
+
+export interface IllustrationDeleteResponse {
+  removed: boolean;
+  removed_ids: string[];
+  deleted_urls: number;
+  shared_urls: number;
+  cleanup_failures: IllustrationCleanupFailure[];
+}
+
+export interface IllustrationRefreshBatchResponse {
+  tasks: IllustrationImportTask[];
+}
+
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   const { data } = await client.get<DashboardSummary>('/dashboard/summary');
   return data;
@@ -472,4 +565,74 @@ export async function importManualIllustration(
     timeout: 30000
   });
   return data;
+}
+
+export async function listIllustrations(
+  params: IllustrationListQuery = {},
+): Promise<IllustrationListResponse> {
+  const { data } = await client.get<IllustrationListResponse>('/illustrations', { params });
+  return data;
+}
+
+export async function getIllustration(id: string): Promise<IllustrationDetail> {
+  const { data } = await client.get<IllustrationDetail>(
+    `/illustrations/${encodeURIComponent(id)}`,
+  );
+  return data;
+}
+
+export async function updateIllustration(
+  id: string,
+  payload: IllustrationUpdatePayload,
+): Promise<IllustrationDetail> {
+  const { data } = await client.patch<IllustrationDetail>(
+    `/illustrations/${encodeURIComponent(id)}`,
+    payload,
+  );
+  return data;
+}
+
+export async function deleteIllustration(id: string): Promise<IllustrationDeleteResponse> {
+  const { data } = await client.delete<IllustrationDeleteResponse>(
+    `/illustrations/${encodeURIComponent(id)}`,
+  );
+  return data;
+}
+
+export async function bulkUpdateIllustrations(
+  payload: IllustrationBulkUpdatePayload,
+): Promise<IllustrationBulkUpdateResponse> {
+  const { data } = await client.post<IllustrationBulkUpdateResponse>(
+    '/illustrations/bulk/update',
+    payload,
+  );
+  return data;
+}
+
+export async function bulkDeleteIllustrations(
+  ids: string[],
+): Promise<IllustrationDeleteResponse> {
+  const { data } = await client.post<IllustrationDeleteResponse>('/illustrations/bulk/delete', { ids });
+  return data;
+}
+
+export async function refreshIllustration(id: string): Promise<IllustrationImportTask> {
+  const { data } = await client.post<IllustrationImportTask>(
+    `/illustrations/${encodeURIComponent(id)}/refresh`,
+  );
+  return data;
+}
+
+export async function bulkRefreshIllustrations(
+  ids: string[],
+): Promise<IllustrationRefreshBatchResponse> {
+  const { data } = await client.post<IllustrationRefreshBatchResponse>(
+    '/illustrations/bulk/refresh',
+    { ids },
+  );
+  return data;
+}
+
+export function illustrationMediaUrl(id: string, page = 0): string {
+  return `/api/illustrations/${encodeURIComponent(id)}/pages/${page}/media`;
 }
