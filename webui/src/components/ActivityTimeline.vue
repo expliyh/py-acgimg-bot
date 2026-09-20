@@ -32,7 +32,7 @@ function activityKey(entry: ActivityEntry): string {
 </script>
 
 <template>
-  <v-timeline class="w-100">
+  <v-timeline class="w-100 activity-timeline" side="end" density="comfortable">
     <v-timeline-item
       v-for="entry in props.entries"
       :key="activityKey(entry)"
@@ -40,7 +40,7 @@ function activityKey(entry: ActivityEntry): string {
       fill-dot
     >
       <template #opposite>
-        <span class="text-body-2 text-medium-emphasis">
+        <span class="text-caption text-medium-emphasis">
           {{ entry.sent_at ? new Date(entry.sent_at).toLocaleString() : '未知时间' }}
         </span>
       </template>
@@ -48,7 +48,7 @@ function activityKey(entry: ActivityEntry): string {
         <v-icon icon="mdi-flash" color="white" />
       </template>
       <template #default>
-        <v-card class="elevation-1">
+        <v-card class="content-card">
           <v-card-title>
             <div class="d-flex align-center justify-space-between">
               <span class="text-body-2">消息 ID #{{ entry.message_id }}</span>
@@ -61,7 +61,7 @@ function activityKey(entry: ActivityEntry): string {
             </div>
           </v-card-title>
           <v-card-text>
-            <div class="text-medium-emphasis text-body-2">对象 ID：{{ entry.scope_id }}</div>
+            <div class="text-medium-emphasis text-caption">对象 ID：{{ entry.scope_id }} · {{ entry.sent_at ? new Date(entry.sent_at).toLocaleString() : '未知时间' }}</div>
             <p class="mt-2 mb-0 white-space-pre-line">
               {{ entry.preview ?? '暂无文本内容' }}
             </p>

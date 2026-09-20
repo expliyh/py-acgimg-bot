@@ -74,4 +74,20 @@ const router = createRouter({
   ]
 });
 
+let recoveringFromChunkError = false;
+
+function isDynamicImportError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /failed to fetch dynamically imported module|importing a module script failed|loading chunk .* failed/i.test(message);
+}
+
+// Lazy-loaded views can briefly become unavailable after a deployment or while
+// Vite refreshes optimized dependencies. Keep sidebar navigation pointed at
+// the requested destination instead of leaving the user on the old page.
+router.onError((error, to) => {
+  if (!isDynamicImportError(error) || recoveringFromChunkError) return;
+  recoveringFromChunkError = true;
+  window.location.assign(router.resolve(to).href);
+});
+
 export default router;

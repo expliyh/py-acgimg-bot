@@ -32,15 +32,16 @@ onMounted(loadSummary);
 </script>
 
 <template>
-  <section class="d-flex flex-column ga-4">
-    <div class="d-flex align-center justify-space-between flex-wrap ga-3">
+  <section class="d-flex flex-column ga-5">
+    <div class="dashboard-hero d-flex align-center justify-space-between flex-wrap ga-4">
       <div>
-        <h2 class="text-h5 font-weight-bold ma-0">仪表盘</h2>
-        <p class="text-medium-emphasis mt-1 mb-0">
-          总览运营指标与最近消息动态。
+        <div class="text-overline">运营总览</div>
+        <h1 class="text-h4 font-weight-bold ma-0">欢迎回来，管理员</h1>
+        <p class="text-body-2 text-medium-emphasis mt-2 mb-0">
+          这里汇总群组、用户与消息的最新状态。
         </p>
       </div>
-      <VBtn prepend-icon="mdi-refresh" variant="outlined" :loading="loading" @click="loadSummary">刷新</VBtn>
+      <VBtn prepend-icon="mdi-refresh" variant="outlined" :loading="loading" @click="loadSummary">刷新数据</VBtn>
     </div>
 
     <VRow v-if="!loading && summary">
@@ -88,7 +89,7 @@ onMounted(loadSummary);
       </VCol>
     </VRow>
 
-    <VCard class="elevation-1">
+    <VCard class="content-card">
       <VCardTitle>消息动态</VCardTitle>
       <VCardText>
         <template v-if="summary && summary.recent_activity.length">
@@ -109,7 +110,7 @@ onMounted(loadSummary);
       </VCardText>
     </VCard>
 
-    <VCard class="elevation-1">
+    <VCard class="content-card">
       <VCardTitle>运营建议</VCardTitle>
       <VCardText>
         <p class="text-body-2 text-medium-emphasis mb-3">

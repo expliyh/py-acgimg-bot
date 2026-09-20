@@ -17,18 +17,20 @@ const theme = useTheme();
 const { mdAndUp } = useDisplay();
 const drawer = ref<boolean | null>(null);
 const navItems = [
-  { label: '仪表盘', icon: 'mdi-view-dashboard-outline', to: '/dashboard' },
-  { label: '群组管理', icon: 'mdi-account-group-outline', to: '/groups' },
-  { label: '私聊管理', icon: 'mdi-message-processing-outline', to: '/private' },
-  { label: '命令历史', icon: 'mdi-history', to: '/commands' },
-  { label: '功能配置', icon: 'mdi-tune-variant', to: '/features' },
-  { label: 'Bot Token', icon: 'mdi-key-outline', to: '/bot-tokens' },
-  { label: 'Pixiv Token', icon: 'mdi-palette-outline', to: '/pixiv-tokens' },
-  { label: '图片图库', icon: 'mdi-image-multiple-outline', to: '/illustrations' },
-  { label: '插画导入', icon: 'mdi-image-plus-outline', to: '/illustrations/import' },
-  { label: '图片推送', icon: 'mdi-send-check-outline', to: '/image-push' }
+  { label: '仪表盘', icon: 'mdi-view-dashboard-outline', to: '/dashboard', group: '工作空间' },
+  { label: '群组管理', icon: 'mdi-account-group-outline', to: '/groups', group: '工作空间' },
+  { label: '私聊管理', icon: 'mdi-message-processing-outline', to: '/private', group: '工作空间' },
+  { label: '命令历史', icon: 'mdi-history', to: '/commands', group: '工作空间' },
+  { label: '图片图库', icon: 'mdi-image-multiple-outline', to: '/illustrations', group: '内容管理' },
+  { label: '插画导入', icon: 'mdi-image-plus-outline', to: '/illustrations/import', group: '内容管理' },
+  { label: '图片推送', icon: 'mdi-send-check-outline', to: '/image-push', group: '内容管理' },
+  { label: '功能配置', icon: 'mdi-tune-variant', to: '/features', group: '系统设置' },
+  { label: 'Bot Token', icon: 'mdi-key-outline', to: '/bot-tokens', group: '系统设置' },
+  { label: 'Pixiv Token', icon: 'mdi-palette-outline', to: '/pixiv-tokens', group: '系统设置' }
 ];
 const activePath = computed(() => route.path);
+const activeItem = computed(() => navItems.find((item) => item.to === route.path)
+  ?? navItems.find((item) => route.path.startsWith(`${item.to}/`)));
 const dark = computed(() => theme.global.current.value.dark);
 const confirmationDialog = computed({
   get: () => confirmState.open,
@@ -50,12 +52,13 @@ function toggleTheme() {
 
 <template>
   <v-app>
-    <AppHeader :dark="dark" @toggle-theme="toggleTheme" @toggle-drawer="drawer = !drawer" />
-    <v-navigation-drawer v-model="drawer" :permanent="mdAndUp" :temporary="!mdAndUp" width="264" color="surface">
+    <a class="skip-link" href="#main-content">跳转到主要内容</a>
+    <AppHeader :dark="dark" :page-title="activeItem?.label" @toggle-theme="toggleTheme" @toggle-drawer="drawer = !drawer" />
+    <v-navigation-drawer v-model="drawer" :permanent="mdAndUp" :temporary="!mdAndUp" width="248" color="surface" class="app-drawer">
       <AppSidebar :items="navItems" :active-path="activePath" @navigate="closeDrawer" />
     </v-navigation-drawer>
-    <v-main>
-      <v-container fluid class="pa-4 pa-md-6 page-container"><RouterView /></v-container>
+    <v-main id="main-content" tabindex="-1">
+      <v-container fluid class="page-container"><RouterView /></v-container>
     </v-main>
     <v-dialog
       v-model="confirmationDialog"
