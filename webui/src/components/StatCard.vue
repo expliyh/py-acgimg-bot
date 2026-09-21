@@ -11,10 +11,10 @@ const props = defineProps<{
 </script>
 
 <template>
-  <v-card class="h-100 elevation-2 rounded-lg">
+  <v-card rounded="lg" class="h-100 rounded-lg metric-card">
     <v-card-title>
       <div class="d-flex align-center justify-space-between">
-        <span class="text-body-2 text-medium-emphasis">{{ props.label }}</span>
+        <span class="text-body-2 text-medium-emphasis font-weight-medium">{{ props.label }}</span>
         <v-chip v-if="hint" :color="normalizeVuetifyColor(accent ?? 'primary')" rounded="pill" size="small">
           {{ hint }}
         </v-chip>
