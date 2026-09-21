@@ -379,14 +379,14 @@ files = [
 
 [[package]]
 name = "b2sdk"
-version = "2.12.0"
+version = "2.13.0"
 description = "Backblaze B2 SDK"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "b2sdk-2.12.0-py3-none-any.whl", hash = "sha256:58af4e925b2ed0422b4f2f26ee3f53c7045520ae6ddcbe65b5bc9e4b99725bce"},
-    {file = "b2sdk-2.12.0.tar.gz", hash = "sha256:da7b65e1af4f59c7de7d079c1e25de6b033aa45090fded4caefe52ded9b13ee6"},
+    {file = "b2sdk-2.13.0-py3-none-any.whl", hash = "sha256:2063cd1c1c202f2dbc0fc517e9ad0c50980939355f565704e0183c4817f18524"},
+    {file = "b2sdk-2.13.0.tar.gz", hash = "sha256:edb586be7698b4b868194506cd81d594364e445817461c7e7b43df47378f6827"},
 ]
 
 [package.dependencies]
@@ -2601,4 +2601,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "f98059d4991a99a57a3bfac31352679cc07812da129b8abfe989a2fe6b7949bc"
+content-hash = "f8c633cc905a6ae22ef86c1f26512d20c34e8899addd5ca9d1d418674ff4e763"
