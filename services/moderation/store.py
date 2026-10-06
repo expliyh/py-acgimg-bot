@@ -25,7 +25,12 @@ LEGACY = {
     "kick_on_timeout",
     "keyword_filter_enabled",
 }
-TEMPORARY_RECORD_KINDS = {"message", "join_seen", "membership_seen"}
+TEMPORARY_RECORD_KINDS = {
+    "message",
+    "join_seen",
+    "membership_seen",
+    "service_message",
+}
 _task_locks = WeakValueDictionary()
 
 

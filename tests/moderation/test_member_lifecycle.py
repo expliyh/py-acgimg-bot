@@ -284,6 +284,85 @@ async def test_leave_during_verification_allows_immediate_rejoin(
     guard_bot.ban_chat_member.assert_not_awaited()
 
 
+@pytest.mark.parametrize("service_first", [False, True])
+async def test_bot_kick_queues_recent_join_and_leave_service_messages(
+    guard_group, guard_bot, guard_message, service_first
+):
+    await store.save_policy(guard_group, {"clean_join_messages_on_kick": True})
+    joined = guard_message(
+        message_id=40,
+        text=None,
+        new_chat_members=[guard_message().from_user.to_dict()],
+    )
+    context = SimpleNamespace(bot=guard_bot)
+    await runtime.preprocess(Update(100, message=joined), context)
+
+    left = guard_message(
+        message_id=41,
+        text=None,
+        date=int((joined.date + timedelta(seconds=1)).timestamp()),
+        left_chat_member=joined.from_user.to_dict(),
+    )
+    kicked = membership(
+        joined,
+        guard_bot,
+        {"status": "member", "user": joined.from_user.to_dict()},
+        {"status": "kicked", "user": joined.from_user.to_dict(), "until_date": 0},
+        actor=guard_bot.id,
+        date=joined.date + timedelta(seconds=1),
+    )
+    if service_first:
+        await runtime.preprocess(Update(101, message=left), context)
+    await runtime.membership(kicked, context)
+    if not service_first:
+        await runtime.preprocess(Update(101, message=left), context)
+
+    async with engine.new_session() as session:
+        rows = (
+            await session.scalars(
+                select(GuardTask).where(
+                    GuardTask.group_id == guard_group,
+                    GuardTask.kind == "delete",
+                )
+            )
+        ).all()
+    assert {row.data["message_id"] for row in rows} == {40, 41}
+    assert all(row.data["service_cleanup"] for row in rows)
+
+
+async def test_voluntary_leave_does_not_queue_join_message_cleanup(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"clean_join_messages_on_kick": True})
+    joined = guard_message(
+        message_id=50,
+        text=None,
+        new_chat_members=[guard_message().from_user.to_dict()],
+    )
+    context = SimpleNamespace(bot=guard_bot)
+    await runtime.preprocess(Update(110, message=joined), context)
+    await runtime.membership(
+        membership(
+            joined,
+            guard_bot,
+            {"status": "member", "user": joined.from_user.to_dict()},
+            {"status": "left", "user": joined.from_user.to_dict()},
+            actor=joined.from_user.id,
+            date=joined.date + timedelta(seconds=1),
+        ),
+        context,
+    )
+    async with engine.new_session() as session:
+        assert not (
+            await session.scalars(
+                select(GuardTask).where(
+                    GuardTask.group_id == guard_group,
+                    GuardTask.kind == "delete",
+                )
+            )
+        ).all()
+
+
 async def test_delayed_departure_does_not_clear_new_join_verification(
     guard_group, guard_bot, guard_message
 ):

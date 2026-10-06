@@ -1,7 +1,7 @@
 import hashlib
 import json
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy import update as sql_update
@@ -26,6 +26,151 @@ from services.telegram_cache import get_cached_admin_ids, invalidate_chat_admins
 from . import actions, ai, bot_approval, rules, store, verification
 
 logger = logging.getLogger(__name__)
+
+SERVICE_MESSAGE_KIND = "service_message"
+SERVICE_MESSAGE_MAX_AGE = timedelta(hours=48)
+
+
+def _service_message_id(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _service_message_cutoff() -> float:
+    return (
+        store.now().replace(tzinfo=timezone.utc) - SERVICE_MESSAGE_MAX_AGE
+    ).timestamp()
+
+
+async def _queue_service_cleanup_locked(group_id: int, data: dict, settings) -> None:
+    """Queue known service messages for a bot-triggered kick.
+
+    Telegram's deleteMessage method requires a message ID and only accepts
+    messages from the last 48 hours, so stale or malformed records are ignored.
+    The caller must hold the group operation lock.
+    """
+
+    if not settings.clean_join_messages_on_kick:
+        return
+    queued = {
+        message_id
+        for message_id in (
+            _service_message_id(value) for value in data.get("queued_ids", [])
+        )
+        if message_id is not None
+    }
+    cutoff = _service_message_cutoff()
+    for phase in ("join", "leave"):
+        for entry in data.get(phase, []):
+            if not isinstance(entry, dict):
+                continue
+            message_id = _service_message_id(entry.get("message_id"))
+            try:
+                timestamp = float(entry.get("timestamp"))
+            except (TypeError, ValueError):
+                timestamp = 0
+            if message_id is None or timestamp <= cutoff or message_id in queued:
+                continue
+            await store.task(
+                group_id,
+                "delete",
+                store.now(),
+                {
+                    "message_id": message_id,
+                    "service_cleanup": True,
+                    "user_id": data.get("user_id"),
+                    "phase": phase,
+                },
+            )
+            queued.add(message_id)
+    data["queued_ids"] = sorted(queued)
+
+
+async def remember_service_message(
+    group_id: int,
+    user_id: int,
+    phase: str,
+    message_id: int,
+    date,
+) -> None:
+    """Persist a join/leave service message ID for a short retention window."""
+
+    if phase not in {"join", "leave"}:
+        raise ValueError(f"Unsupported service message phase: {phase}")
+    message_id = _service_message_id(message_id)
+    if message_id is None:
+        return
+    async with store.lock(group_id):
+        row = await store.record(group_id, SERVICE_MESSAGE_KIND, str(user_id))
+        data = dict(row["data"] or {}) if row else {}
+        for name in ("join", "leave", "queued_ids"):
+            if not isinstance(data.get(name), list):
+                data[name] = []
+        entry = {"message_id": message_id, "timestamp": date.timestamp()}
+        duplicate = any(
+            _service_message_id(item.get("message_id")) == message_id
+            for item in data[phase]
+            if isinstance(item, dict)
+        )
+        if not duplicate:
+            data[phase].append(entry)
+        if phase == "join":
+            # A fresh join starts a new membership lifecycle. Previously queued
+            # deletion tasks remain durable, while later leave events belong to
+            # this new lifecycle.
+            previous_timestamps = []
+            for item in data[phase]:
+                if not isinstance(item, dict) or item is entry:
+                    continue
+                try:
+                    previous_timestamps.append(float(item.get("timestamp")))
+                except (TypeError, ValueError):
+                    continue
+            if not duplicate and (
+                not data.get("kicked_by_bot")
+                or not previous_timestamps
+                or entry["timestamp"] > max(previous_timestamps)
+            ):
+                data["kicked_by_bot"] = False
+                data["queued_ids"] = []
+        data["user_id"] = user_id
+        settings = await store.policy(group_id)
+        if data.get("kicked_by_bot"):
+            await _queue_service_cleanup_locked(group_id, data, settings)
+        await store.put_record(
+            group_id,
+            SERVICE_MESSAGE_KIND,
+            str(user_id),
+            data,
+            touch=True,
+        )
+
+
+async def queue_kick_service_cleanup(group_id: int, user_id: int) -> None:
+    """Mark a bot-triggered kick and queue all known recent service messages."""
+
+    async with store.lock(group_id):
+        settings = await store.policy(group_id)
+        if not settings.clean_join_messages_on_kick:
+            return
+        row = await store.record(group_id, SERVICE_MESSAGE_KIND, str(user_id))
+        data = dict(row["data"] or {}) if row else {}
+        for name in ("join", "leave", "queued_ids"):
+            if not isinstance(data.get(name), list):
+                data[name] = []
+        data["user_id"] = user_id
+        data["kicked_by_bot"] = True
+        await _queue_service_cleanup_locked(group_id, data, settings)
+        await store.put_record(
+            group_id,
+            SERVICE_MESSAGE_KIND,
+            str(user_id),
+            data,
+            touch=True,
+        )
 
 
 async def remember_message(group_id: int, message):
@@ -61,6 +206,16 @@ async def preprocess(update, context):
         return
     settings = await store.policy(chat.id)
     for member in message.new_chat_members or []:
+        try:
+            await remember_service_message(
+                chat.id, member.id, "join", message.message_id, message.date
+            )
+        except Exception:  # noqa: BLE001 - history capture must not block moderation
+            logger.exception(
+                "Failed to persist join service message %s for user %s",
+                message.message_id,
+                member.id,
+            )
         await member_joined(
             context.bot,
             chat,
@@ -70,6 +225,20 @@ async def preprocess(update, context):
             event_source="service",
         )
     if message.left_chat_member:
+        try:
+            await remember_service_message(
+                chat.id,
+                message.left_chat_member.id,
+                "leave",
+                message.message_id,
+                message.date,
+            )
+        except Exception:  # noqa: BLE001 - history capture must not block moderation
+            logger.exception(
+                "Failed to persist leave service message %s for user %s",
+                message.message_id,
+                message.left_chat_member.id,
+            )
         await member_left(
             chat.id,
             message.left_chat_member.id,
@@ -460,6 +629,14 @@ async def membership(update, context):
             change.date,
             event_id=update.update_id,
         )
+        if (
+            change.new_chat_member.status == "kicked"
+            and change.from_user
+            and change.from_user.id == context.bot.id
+        ):
+            await queue_kick_service_cleanup(
+                change.chat.id, change.new_chat_member.user.id
+            )
     # Only a permission edit for a current member can invalidate our restriction.
     elif was_present and is_present and change.from_user.id != context.bot.id:
         user_id = change.new_chat_member.user.id

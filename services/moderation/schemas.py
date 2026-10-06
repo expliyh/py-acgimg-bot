@@ -73,6 +73,7 @@ class Policy(StrictModel):
     rules_text: str = Field("", max_length=4000)
     replies_enabled: bool = False
     clean_service_messages: bool = False
+    clean_join_messages_on_kick: bool = False
     ai_spam: bool = False
     ai_abuse: bool = False
     ai_images: bool = False
