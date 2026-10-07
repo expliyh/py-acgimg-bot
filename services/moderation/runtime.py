@@ -131,7 +131,6 @@ async def remember_service_message(
                 # starts a new lifecycle and clears the kick marker.
                 if kicked_at is None or entry["timestamp"] > kicked_at:
                     data["kicked_by_bot"] = False
-                    data["queued_ids"] = []
                     data.pop("kicked_at", None)
         data["user_id"] = user_id
         settings = await store.policy(group_id)
