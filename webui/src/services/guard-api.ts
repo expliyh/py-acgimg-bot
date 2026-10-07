@@ -34,6 +34,7 @@ export interface GuardPolicy {
   rules_text: string;
   replies_enabled: boolean;
   clean_service_messages: boolean;
+  clean_join_messages_on_kick: boolean;
   ai_spam: boolean;
   ai_abuse: boolean;
   ai_images: boolean;
