@@ -121,21 +121,18 @@ async def remember_service_message(
             # A fresh join starts a new membership lifecycle. Previously queued
             # deletion tasks remain durable, while later leave events belong to
             # this new lifecycle.
-            previous_timestamps = []
-            for item in data[phase]:
-                if not isinstance(item, dict) or item is entry:
-                    continue
+            if not duplicate and data.get("kicked_by_bot"):
                 try:
-                    previous_timestamps.append(float(item.get("timestamp")))
+                    kicked_at = float(data.get("kicked_at"))
                 except (TypeError, ValueError):
-                    continue
-            if not duplicate and (
-                not data.get("kicked_by_bot")
-                or not previous_timestamps
-                or entry["timestamp"] > max(previous_timestamps)
-            ):
-                data["kicked_by_bot"] = False
-                data["queued_ids"] = []
+                    kicked_at = None
+                # A service message delivered after the membership update can
+                # still describe the earlier join. Only a strictly newer join
+                # starts a new lifecycle and clears the kick marker.
+                if kicked_at is None or entry["timestamp"] > kicked_at:
+                    data["kicked_by_bot"] = False
+                    data["queued_ids"] = []
+                    data.pop("kicked_at", None)
         data["user_id"] = user_id
         settings = await store.policy(group_id)
         if data.get("kicked_by_bot"):
@@ -149,7 +146,7 @@ async def remember_service_message(
         )
 
 
-async def queue_kick_service_cleanup(group_id: int, user_id: int) -> None:
+async def queue_kick_service_cleanup(group_id: int, user_id: int, kicked_at) -> None:
     """Mark a bot-triggered kick and queue all known recent service messages."""
 
     async with store.lock(group_id):
@@ -163,6 +160,7 @@ async def queue_kick_service_cleanup(group_id: int, user_id: int) -> None:
                 data[name] = []
         data["user_id"] = user_id
         data["kicked_by_bot"] = True
+        data["kicked_at"] = kicked_at.timestamp()
         await _queue_service_cleanup_locked(group_id, data, settings)
         await store.put_record(
             group_id,
@@ -635,7 +633,7 @@ async def membership(update, context):
             and change.from_user.id == context.bot.id
         ):
             await queue_kick_service_cleanup(
-                change.chat.id, change.new_chat_member.user.id
+                change.chat.id, change.new_chat_member.user.id, change.date
             )
     # Only a permission edit for a current member can invalidate our restriction.
     elif was_present and is_present and change.from_user.id != context.bot.id:

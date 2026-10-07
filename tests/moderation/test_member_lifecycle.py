@@ -363,6 +363,52 @@ async def test_voluntary_leave_does_not_queue_join_message_cleanup(
         ).all()
 
 
+async def test_delayed_join_service_message_keeps_kick_cleanup_marker(
+    guard_group, guard_bot, guard_message
+):
+    await store.save_policy(guard_group, {"clean_join_messages_on_kick": True})
+    joined = guard_message(message_id=60)
+    context = SimpleNamespace(bot=guard_bot)
+    kick_date = joined.date + timedelta(seconds=10)
+    await runtime.membership(
+        membership(
+            joined,
+            guard_bot,
+            {"status": "member", "user": joined.from_user.to_dict()},
+            {"status": "kicked", "user": joined.from_user.to_dict(), "until_date": 0},
+            actor=guard_bot.id,
+            date=kick_date,
+        ),
+        context,
+    )
+
+    delayed_join = guard_message(
+        message_id=60,
+        text=None,
+        new_chat_members=[joined.from_user.to_dict()],
+        date=int(joined.date.timestamp()),
+    )
+    await runtime.preprocess(Update(120, message=delayed_join), context)
+    left = guard_message(
+        message_id=61,
+        text=None,
+        left_chat_member=joined.from_user.to_dict(),
+        date=int((kick_date + timedelta(seconds=1)).timestamp()),
+    )
+    await runtime.preprocess(Update(121, message=left), context)
+
+    async with engine.new_session() as session:
+        rows = (
+            await session.scalars(
+                select(GuardTask).where(
+                    GuardTask.group_id == guard_group,
+                    GuardTask.kind == "delete",
+                )
+            )
+        ).all()
+    assert {row.data["message_id"] for row in rows} == {60, 61}
+
+
 async def test_delayed_departure_does_not_clear_new_join_verification(
     guard_group, guard_bot, guard_message
 ):
