@@ -12,13 +12,14 @@ from telegram.error import RetryAfter, TelegramError
 from models import GroupGuardPendingVerification as Pending
 from registries import engine
 
-from . import actions, reviews, rules, store
+from . import actions, reviews, rules, store, username_review
 from .schemas import Policy
 
 logger = logging.getLogger(__name__)
 
 _RETRIGGERABLE_STATES = frozenset({"pending", "restricted"})
 _UNSAFE_RETRIGGER_STATES = frozenset({"preparing", "processing", "uncertain"})
+_USERNAME_UNCHECKED = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -460,12 +461,33 @@ async def callback(update, context, parts):
     )
 
 
-async def joined(bot, chat, member, *, lock_held=False):
+async def inspect_username(chat, member):
+    """Run the potentially remote check before acquiring the group lock."""
+    settings = await store.policy(chat.id)
+    try:
+        return await username_review.inspect_with_ai(member, settings)
+    except Exception as exc:
+        await store.event(chat.id, "username_review", status="failed", user_id=member.id, reason=type(exc).__name__)
+        return None
+
+
+async def joined(
+    bot, chat, member, *, lock_held=False, joined_at=None,
+    username_hit=_USERNAME_UNCHECKED,
+):
     settings = await store.policy(chat.id)
     if member.is_bot:
         from . import bot_approval
 
         return await bot_approval.joined(bot, chat, member, settings=settings, lock_held=lock_held)
+    # Runtime supplies a result obtained outside the group critical section.
+    if username_hit is _USERNAME_UNCHECKED:
+        username_hit = await inspect_username(chat, member)
+    hit = username_hit
+    if hit:
+        return await username_review.reject_member(
+            bot, chat, member, hit["reason"], joined_at=joined_at, lock_held=lock_held
+        )
     raid = False
     if settings.raid_enabled:
         count = rules.window((chat.id, "joins"), settings.raid_window)
@@ -506,6 +528,16 @@ async def join_request(update, context):
     request = update.chat_join_request
     group_id = request.chat.id
     settings = await store.policy(group_id)
+    if not settings.join_requests_enabled and not settings.username_review_enabled:
+        return
+    try:
+        hit = await username_review.inspect_with_ai(request.from_user, settings)
+    except Exception as exc:
+        await store.event(group_id, "username_review", status="failed", user_id=request.from_user.id, reason=type(exc).__name__)
+        hit = None
+    if hit:
+        await username_review.reject_request(context.bot, request, hit["reason"])
+        return
     if not settings.join_requests_enabled:
         return
     receipt, fresh = await store.event(

@@ -29,6 +29,7 @@ from services.moderation.schemas import (
     PolicyPatch,
     ReviewDecision,
     Rule,
+    UsernameReviewConfig,
     validate_record_name,
 )
 
@@ -45,6 +46,7 @@ router = APIRouter(
     dependencies=[Depends(ensure_group)],
 )
 model_router = APIRouter(prefix="/api/guard-ai", tags=["group-guard-ai"])
+username_router = APIRouter(prefix="/api/guard-username", tags=["group-guard-username"])
 
 
 class GroupMemberListItem(BaseModel):
@@ -395,3 +397,23 @@ async def get_ai():
 @model_router.put("")
 async def put_ai(payload: AIConfig):
     return await store.save_ai_config(payload)
+
+
+@username_router.get("", response_model=UsernameReviewConfig)
+async def get_username_config():
+    return await store.username_config()
+
+
+@username_router.get("/defaults", response_model=UsernameReviewConfig)
+async def get_username_defaults():
+    return store.default_username_config()
+
+
+@username_router.put("", response_model=UsernameReviewConfig)
+async def put_username_config(payload: UsernameReviewConfig):
+    saved = await store.save_username_config(payload)
+    await store.event(
+        0, "username_config", source="web:deployment-admin",
+        data={"fields": ["sensitive_words"]},
+    )
+    return saved

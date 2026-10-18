@@ -23,9 +23,10 @@ from models import (
 from registries import engine, user_registry
 from services.telegram_cache import get_cached_admin_ids, invalidate_chat_admins
 
-from . import actions, ai, bot_approval, rules, store, verification
+from . import actions, ai, bot_approval, rules, store, username_review, verification
 
 logger = logging.getLogger(__name__)
+_active_join_reviews = set()
 
 
 async def remember_message(group_id: int, message):
@@ -60,6 +61,10 @@ async def preprocess(update, context):
         await migrate(message.migrate_from_chat_id, chat.id)
         return
     settings = await store.policy(chat.id)
+    username_cleanup = False
+    if message.new_chat_members or message.left_chat_member:
+        # Capture join message IDs before username screening can remove a user.
+        username_cleanup = await username_review.track_service_message(context.bot, message)
     for member in message.new_chat_members or []:
         await member_joined(
             context.bot,
@@ -69,6 +74,8 @@ async def preprocess(update, context):
             event_id=update.update_id,
             event_source="service",
         )
+    if message.new_chat_members:
+        username_cleanup = await username_review.track_service_message(context.bot, message)
     if message.left_chat_member:
         await member_left(
             chat.id,
@@ -76,7 +83,7 @@ async def preprocess(update, context):
             message.date,
             event_id=update.update_id,
         )
-    if message.left_chat_member and settings.goodbye_enabled:
+    if message.left_chat_member and settings.goodbye_enabled and not username_cleanup:
         await context.bot.send_message(
             chat.id,
             verification.greeting(
@@ -86,7 +93,7 @@ async def preprocess(update, context):
             ),
         )
     if message.new_chat_members or message.left_chat_member:
-        if settings.clean_service_messages:
+        if settings.clean_service_messages and not username_cleanup:
             await store.task(
                 chat.id, "delete", store.now(), {"message_id": message.message_id}
             )
@@ -242,6 +249,7 @@ async def preprocess(update, context):
 
 async def member_joined(bot, chat, user, date, *, event_id=None, event_source=None):
     # Service messages and chat_member updates describe the same transition.
+    is_approval_bot = getattr(user, "is_bot", False) and user.id != getattr(bot, "id", None)
     async with store.lock(chat.id):
         try:
             await user_registry.sync_telegram_user(user.id, user.username)
@@ -249,11 +257,15 @@ async def member_joined(bot, chat, user, date, *, event_id=None, event_source=No
             logger.exception("Failed to persist username for joined user %s", user.id)
         old = await store.record(chat.id, "join_seen", str(user.id))
         timestamp = date.timestamp()
-        if old and abs(old["data"]["timestamp"] - timestamp) < 10:
-            if not (
-                getattr(user, "is_bot", False)
-                and user.id != getattr(bot, "id", None)
-            ):
+        if old and not is_approval_bot and old["data"]["timestamp"] > timestamp:
+            return
+        # A reservation left by a stopped process must remain retryable.
+        active = old and (
+            old["data"].get("state") != "checking"
+            or old["data"].get("generation") in _active_join_reviews
+        )
+        if active and abs(old["data"]["timestamp"] - timestamp) < 10:
+            if not is_approval_bot:
                 return
             # A delayed leave can preserve the generic join_seen row while a
             # bot has already rejoined.  For bots, compare the durable
@@ -301,8 +313,15 @@ async def member_joined(bot, chat, user, date, *, event_id=None, event_source=No
                         return
                 except (TypeError, ValueError):
                     pass
-        try:
-            if getattr(user, "is_bot", False) and user.id != getattr(bot, "id", None):
+        if not is_approval_bot:
+            generation = store.uid()
+            await store.put_record(chat.id, "join_seen", str(user.id), {
+                "timestamp": timestamp, "generation": generation, "state": "checking",
+                "event_id": event_id, "event_source": event_source,
+            })
+            _active_join_reviews.add(generation)
+        else:
+            try:
                 settings = await store.policy(chat.id)
                 handled = await bot_approval.joined(
                     bot,
@@ -315,33 +334,53 @@ async def member_joined(bot, chat, user, date, *, event_id=None, event_source=No
                     event_source=event_source,
                     new_membership=event_id is not None,
                 )
-            else:
-                handled = await verification.joined(bot, chat, user, lock_held=True)
-        except (ValueError, TelegramError) as exc:
-            status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
-            await store.event(
-                chat.id,
-                "join",
-                status=status,
-                user_id=user.id,
-                reason=type(exc).__name__,
-            )
-            return
-        if handled:
-            seen_data = {"timestamp": timestamp}
-            if getattr(user, "is_bot", False):
-                seen_data.update(
-                    {
-                        "event_id": event_id,
-                        "event_source": event_source,
-                    }
+            except (ValueError, TelegramError) as exc:
+                status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
+                await store.event(
+                    chat.id, "join", status=status, user_id=user.id,
+                    reason=type(exc).__name__,
                 )
-            await store.put_record(
-                chat.id,
-                "join_seen",
-                str(user.id),
-                seen_data,
-            )
+                return
+            if handled:
+                await store.put_record(chat.id, "join_seen", str(user.id), {
+                    "timestamp": timestamp, "event_id": event_id,
+                    "event_source": event_source,
+                })
+            return
+    await _review_member_join(bot, chat, user, date, generation)
+
+
+async def _review_member_join(bot, chat, user, date, generation):
+    try:
+        hit = None if user.is_bot else await verification.inspect_username(chat, user)
+        async with store.lock(chat.id):
+            seen = await store.record(chat.id, "join_seen", str(user.id))
+            if not seen or seen["data"].get("generation") != generation:
+                return  # A departure or a newer join invalidated this result.
+            try:
+                handled = await verification.joined(
+                    bot, chat, user, lock_held=True, joined_at=date, username_hit=hit,
+                )
+            except (ValueError, TelegramError) as exc:
+                status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
+                await store.event(chat.id, "join", status=status, user_id=user.id,
+                                  reason=type(exc).__name__)
+                return
+            if handled:
+                await store.put_record(chat.id, "join_seen", str(user.id),
+                                       seen["data"] | {"state": "done"})
+    finally:
+        # Failure/cancellation may be retried; never erase a newer generation.
+        _active_join_reviews.discard(generation)
+        async with store.lock(chat.id):
+            seen = await store.record(chat.id, "join_seen", str(user.id))
+            if (
+                seen and seen["data"].get("generation") == generation
+                and seen["data"].get("state") == "checking"
+            ):
+                async with engine.new_session() as session:
+                    await session.execute(delete(GuardRecord).where(GuardRecord.id == seen["id"]))
+                    await session.commit()
 
 
 async def member_left(group_id, user_id, date, *, event_id=None):
@@ -376,6 +415,13 @@ async def member_left(group_id, user_id, date, *, event_id=None):
         )
         if joined and joined.data["timestamp"] > date.timestamp():
             return  # A delayed departure must not invalidate a newer join.
+        if joined and event_id is not None:
+            joined_event_id = joined.data.get("event_id")
+            try:
+                if joined_event_id is not None and int(event_id) < int(joined_event_id):
+                    return  # Telegram timestamps may tie within the same second.
+            except (TypeError, ValueError):
+                pass
         await session.execute(
             delete(GuardRecord).where(
                 GuardRecord.group_id == group_id,

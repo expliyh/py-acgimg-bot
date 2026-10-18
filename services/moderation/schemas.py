@@ -15,6 +15,11 @@ from pydantic import (
 
 VERIFICATION_MESSAGE_MAX_LENGTH = 2000
 ACTION_REASON_MAX_LENGTH = 1000
+DEFAULT_USERNAME_SENSITIVE_WORDS = (
+    "加微", "加V", "加QQ", "USDT", "看主页", "上门",
+    "博彩", "网赌", "注册", "兼职", "约炮", "裸聊",
+    "办证", "代开发票", "刷单返利",
+)
 
 
 def validate_record_name(value: str, label: str = "名称") -> str:
@@ -34,6 +39,31 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def validate_username_words(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        word = value.strip()
+        if not word:
+            continue
+        if len(word) > 100:
+            raise ValueError("用户名敏感词不能超过 100 个字符")
+        key = unicodedata.normalize("NFKC", word).casefold()
+        if key not in seen:
+            result.append(word)
+            seen.add(key)
+    return result
+
+
+class UsernameReviewConfig(StrictModel):
+    sensitive_words: list[str] = Field(default_factory=list, max_length=200)
+
+    @field_validator("sensitive_words")
+    @classmethod
+    def words(cls, values):
+        return validate_username_words(values)
+
+
 class Policy(StrictModel):
     # Bot accounts are handled independently from ordinary member verification.
     # Approval is deliberately on by default; automatic content moderation for
@@ -51,6 +81,11 @@ class Policy(StrictModel):
     verification_mode: Literal["button", "math"] = "button"
     join_auto_approve: bool = False
     join_requests_enabled: bool = False
+    username_review_enabled: bool = False
+    username_sensitive_words: list[str] = Field(default_factory=list, max_length=200)
+    username_block_emoji: bool = False
+    username_block_abnormal_chars: bool = False
+    username_ai_check: bool = False
     rules_enabled: bool = False
     flood_enabled: bool = False
     flood_window: int = Field(10, ge=1, le=300)
@@ -107,6 +142,11 @@ class Policy(StrictModel):
                 raise ValueError("白名单应填写域名，不含协议、路径或通配符")
             result.append(host.encode("idna").decode("ascii"))
         return sorted(set(result))
+
+    @field_validator("username_sensitive_words")
+    @classmethod
+    def username_words(cls, values):
+        return validate_username_words(values)
 
     @model_validator(mode="after")
     def thresholds(self):
@@ -278,6 +318,12 @@ class AIVerdict(StrictModel):
     evidence: str = Field("", max_length=1000)
     sanity_level: Literal[5, 6] | None = None
     r18g: bool | None = None
+
+
+class UsernameVerdict(StrictModel):
+    safe: bool
+    confidence: float = Field(ge=0, le=1)
+    reason: str = Field(max_length=1000)
 
 
 class ReviewDecision(StrictModel):

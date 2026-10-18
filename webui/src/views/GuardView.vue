@@ -132,6 +132,7 @@ const contentForm = reactive<GuardContent>({
   timezone: "Asia/Shanghai",
 });
 const dueAt = ref("");
+const globalUsernameWords = ref("");
 const aiConfig = ref<AIConfig>({
     base_url: "",
     text_model: "",
@@ -155,6 +156,11 @@ const categories: Record<
       "kick_on_timeout",
       "join_auto_approve",
       "join_requests_enabled",
+      "username_review_enabled",
+      "username_sensitive_words",
+      "username_block_emoji",
+      "username_block_abnormal_chars",
+      "username_ai_check",
       "raid_enabled",
       "raid_window",
       "raid_limit",
@@ -216,6 +222,11 @@ const labels: Record<keyof GuardPolicy, string> = {
   keyword_filter_enabled: "启用原有关键词过滤",
   join_auto_approve: "自动批准入群申请",
   join_requests_enabled: "启用入群申请处理",
+  username_review_enabled: "启用用户名审核",
+  username_sensitive_words: "本群追加用户名敏感词（逗号分隔）",
+  username_block_emoji: "禁止含 Emoji 的用户名入群",
+  username_block_abnormal_chars: "禁止含异常字符的用户名入群",
+  username_ai_check: "启用 AI 用户名检查",
   rules_enabled: "启用规则审核",
   domain_allowlist: "域名白名单（逗号分隔）",
   flood_enabled: "启用反刷屏",
@@ -278,7 +289,7 @@ function displayValue(key: keyof GuardPolicy) {
 function setField(key: keyof GuardPolicy, value: unknown) {
   if (!policy.value) return;
   const converted =
-    key === "domain_allowlist"
+    key === "domain_allowlist" || key === "username_sensitive_words"
       ? String(value)
           .split(",")
           .map((s) => s.trim())
@@ -355,6 +366,7 @@ async function load() {
       guardApi.stats(id),
       guardApi.ai(),
       guardApi.tasks(id),
+      guardApi.usernameConfig(),
     ]);
     if (version !== loadVersion) return;
     groupId.value = id;
@@ -369,6 +381,7 @@ async function load() {
       tasks.value,
     ] = values;
     policySnapshot.value = cloneGuardPolicy(policy.value!);
+    globalUsernameWords.value = values[8].sensitive_words.join("\n");
     // New scheduled announcements should follow the group's configured zone.
     contentForm.timezone = policy.value!.timezone;
     rules.value = values[1].items;
@@ -619,6 +632,23 @@ async function saveAI() {
     apiKey.value = "";
   });
 }
+async function saveUsernameConfig() {
+  await run(async () => {
+    const config = await guardApi.saveUsernameConfig({
+      sensitive_words: globalUsernameWords.value
+        .split(/[,，\n]+/)
+        .map((word) => word.trim())
+        .filter(Boolean),
+    });
+    globalUsernameWords.value = config.sensitive_words.join("\n");
+  }, "全局用户名敏感词已保存，对所有启用用户名审核的群生效");
+}
+async function restoreUsernameDefaults() {
+  await run(async () => {
+    const config = await guardApi.usernameDefaults();
+    globalUsernameWords.value = config.sensitive_words.join("\n");
+  }, "已填入默认敏感词，点击保存后生效");
+}
 watch(reviewPage, (p) => {
   if (policy.value)
     void run(async () => {
@@ -810,13 +840,30 @@ watch(
             </VCol>
           </VRow>
           <p v-if="tab === 'content' || tab === 'join'" class="text-caption">
-            模板支持 {user}、{chat}、{timeout}；内容以纯文本发送。
+            入群审核会在 Join Request 批准前和直接入群事件发生时执行；用户名和显示名均检查全局词库与本群追加词，不区分大小写。本群留空仍继承全局词库。
           </p>
           <VBtn :loading="busy" @click="savePolicy"
             >保存群级设置</VBtn
           ></VCardText
         ></VCard
       >
+      <VCard v-if="tab === 'join'">
+        <VCardTitle>全局用户名敏感词</VCardTitle>
+        <VCardText>
+          <p class="text-body-2 mb-4">
+            所有启用用户名审核的群共用此词库，并叠加各群追加词。修改后下次审核即生效；每份词库最多 200 个词，每词最多 100 个字符。
+          </p>
+          <VTextarea
+            v-model="globalUsernameWords"
+            label="全局敏感词（每行一个，或用逗号分隔）"
+            rows="4"
+            auto-grow
+          />
+          <VBtn :loading="busy" @click="saveUsernameConfig">保存全局敏感词</VBtn>
+          <VBtn class="ml-3" variant="outlined" :disabled="busy" @click="restoreUsernameDefaults">恢复默认</VBtn>
+          <p class="text-caption mt-3">恢复默认会填入默认词，点击“保存全局敏感词”后生效。清空并保存可停用全局词库。</p>
+        </VCardText>
+      </VCard>
       <VCard v-if="tab === 'rules'"
         ><VCardTitle>审核规则</VCardTitle
         ><VCardText class="d-flex flex-column ga-3">

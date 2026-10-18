@@ -16,7 +16,10 @@ from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
 from services import group_guard
 
-from .schemas import VERIFICATION_MESSAGE_MAX_LENGTH, AIConfig, Policy
+from .schemas import (
+    DEFAULT_USERNAME_SENSITIVE_WORDS, VERIFICATION_MESSAGE_MAX_LENGTH,
+    AIConfig, Policy, UsernameReviewConfig,
+)
 
 LEGACY = {
     "verification_enabled",
@@ -25,7 +28,9 @@ LEGACY = {
     "kick_on_timeout",
     "keyword_filter_enabled",
 }
-TEMPORARY_RECORD_KINDS = {"message", "join_seen", "membership_seen"}
+TEMPORARY_RECORD_KINDS = {
+    "message", "join_seen", "membership_seen", "username_service", "username_removal",
+}
 _task_locks = WeakValueDictionary()
 
 
@@ -413,6 +418,44 @@ async def mark_task_phase(task_id: str, phase: str) -> None:
             .values(result=phase[:2000])
         )
         await session.commit()
+
+
+def default_username_config() -> UsernameReviewConfig:
+    return UsernameReviewConfig(sensitive_words=list(DEFAULT_USERNAME_SENSITIVE_WORDS))
+
+
+async def ensure_username_config() -> None:
+    """Seed once at startup; never overwrite an existing (even empty) list."""
+    async with lock(0):
+        async with engine.new_session() as session:
+            query = select(GuardRecord).where(
+                GuardRecord.group_id == 0, GuardRecord.kind == "username_config",
+                GuardRecord.key == "default",
+            )
+            if await session.scalar(query) is not None:
+                return
+            session.add(GuardRecord(
+                id=uid(), group_id=0, kind="username_config", key="default",
+                data=default_username_config().model_dump(), enabled=True, created_at=now(),
+            ))
+            try:
+                await session.commit()
+            except IntegrityError:
+                # Another process may have initialized or saved the list first.
+                await session.rollback()
+                if await session.scalar(query) is None:
+                    raise
+
+
+async def username_config() -> UsernameReviewConfig:
+    row = await record(0, "username_config", "default")
+    return UsernameReviewConfig.model_validate(row["data"] if row else {})
+
+
+async def save_username_config(config: UsernameReviewConfig) -> UsernameReviewConfig:
+    async with lock(0):
+        await put_record(0, "username_config", "default", config.model_dump())
+    return config
 
 
 async def ai_config() -> AIConfig:
