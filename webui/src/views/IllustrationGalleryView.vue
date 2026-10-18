@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 
+import TagEditor from '@/components/TagEditor.vue';
 import { useFeedback } from '@/composables/feedback';
 import {
   bulkDeleteIllustrations,
@@ -89,7 +90,8 @@ const detailError = ref('');
 const mediaErrors = ref<Set<string>>(new Set());
 let detailVersion = 0;
 const editForm = reactive<IllustrationUpdatePayload>({});
-const editTagsText = ref('');
+const editTags = ref<string[]>([]);
+const tagEditor = ref<InstanceType<typeof TagEditor> | null>(null);
 
 const bulkEditOpen = ref(false);
 const bulkSaving = ref(false);
@@ -259,7 +261,7 @@ function syncEditForm(value: IllustrationDetail) {
     r18g: value.r18g,
     is_ai: value.is_ai,
   });
-  editTagsText.value = value.tags.join(', ');
+  editTags.value = [...value.tags];
 }
 
 async function openDetail(id: string) {
@@ -297,7 +299,7 @@ function editPayload(): IllustrationUpdatePayload {
     author_url: typeof editForm.author_url === 'string' ? editForm.author_url.trim() || null : null,
     source_url: typeof editForm.source_url === 'string' ? editForm.source_url.trim() || null : null,
     caption: typeof editForm.caption === 'string' ? editForm.caption.trim() || null : null,
-    tags: parseTags(editTagsText.value),
+    tags: [...editTags.value],
     sanity_level: editForm.sanity_level ?? null,
     x_restrict: editForm.x_restrict ?? null,
     r18g: editForm.r18g ?? false,
@@ -307,6 +309,7 @@ function editPayload(): IllustrationUpdatePayload {
 
 async function saveDetail() {
   if (!detail.value) return;
+  tagEditor.value?.commit();
   detailSaving.value = true;
   try {
     const updated = await updateIllustration(detail.value.id, editPayload());
@@ -654,7 +657,7 @@ onUnmounted(stopQueuePolling);
                 <VTextField v-model="editForm.author_url" label="作者链接" type="url" />
                 <VTextField v-model="editForm.source_url" label="来源链接" type="url" />
                 <VTextarea v-model="editForm.caption" label="描述" rows="3" />
-                <VTextField v-model="editTagsText" label="标签（逗号分隔）" hint="留空可清空标签" persistent-hint />
+                <TagEditor ref="tagEditor" v-model="editTags" />
                 <VRow density="compact"><VCol cols="6"><VNumberInput v-model="editForm.sanity_level" label="过滤等级" :min="0" :max="10" /></VCol><VCol cols="6"><VSelect v-model="editForm.x_restrict" label="限制级" :items="xRestrictOptions.slice(1)" /></VCol></VRow>
                 <div class="d-flex flex-wrap ga-4"><VSwitch v-model="editForm.r18g" label="R18G" color="error" hide-details /><VSwitch v-model="editForm.is_ai" label="AI 作品" color="info" hide-details /></div>
                 <VDivider class="my-3" />
