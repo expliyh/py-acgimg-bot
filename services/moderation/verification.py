@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _RETRIGGERABLE_STATES = frozenset({"pending", "restricted"})
 _UNSAFE_RETRIGGER_STATES = frozenset({"preparing", "processing", "uncertain"})
+_USERNAME_UNCHECKED = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -460,17 +461,29 @@ async def callback(update, context, parts):
     )
 
 
-async def joined(bot, chat, member, *, lock_held=False, joined_at=None):
+async def inspect_username(chat, member):
+    """Run the potentially remote check before acquiring the group lock."""
+    settings = await store.policy(chat.id)
+    try:
+        return await username_review.inspect_with_ai(member, settings)
+    except Exception as exc:
+        await store.event(chat.id, "username_review", status="failed", user_id=member.id, reason=type(exc).__name__)
+        return None
+
+
+async def joined(
+    bot, chat, member, *, lock_held=False, joined_at=None,
+    username_hit=_USERNAME_UNCHECKED,
+):
     settings = await store.policy(chat.id)
     if member.is_bot:
         from . import bot_approval
 
         return await bot_approval.joined(bot, chat, member, settings=settings, lock_held=lock_held)
-    try:
-        hit = await username_review.inspect_with_ai(member, settings)
-    except Exception as exc:
-        await store.event(chat.id, "username_review", status="failed", user_id=member.id, reason=type(exc).__name__)
-        hit = None
+    # Runtime supplies a result obtained outside the group critical section.
+    if username_hit is _USERNAME_UNCHECKED:
+        username_hit = await inspect_username(chat, member)
+    hit = username_hit
     if hit:
         return await username_review.reject_member(
             bot, chat, member, hit["reason"], joined_at=joined_at, lock_held=lock_held

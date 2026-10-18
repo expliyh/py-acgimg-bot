@@ -17,6 +17,7 @@ from . import actions, ai, store
 
 REMOVAL_NOTICE = "有用户因用户名审核未通过，已被移出群聊。"
 SERVICE_RETENTION_SECONDS = 47 * 3600
+AI_REJECTION_CONFIDENCE = 0.9
 
 
 async def _queue_service_cleanup(group_id, user_id, *, target_message_id=None):
@@ -149,13 +150,14 @@ async def inspect_with_ai(user, policy):
     config = await store.ai_config()
     if not config.base_url or not config.text_model:
         return None
-    value = getattr(user, "username", None) or getattr(user, "full_name", None) or ""
+    username = (getattr(user, "username", None) or "").strip()
+    display_name = (getattr(user, "full_name", None) or "").strip()
+    # Bound each field independently so a long name cannot hide the other one.
+    value = f"用户名：{username[:128]}\n显示名：{display_name[:256]}"
     verdict, _usage = await ai.check_username(config, value)
-    if verdict.safe:
+    if verdict.safe or verdict.confidence < AI_REJECTION_CONFIDENCE:
         return None
-    if not verdict.safe:
-        return {"reason": f"AI 用户名检查：{verdict.reason}", "kind": "ai", "confidence": verdict.confidence}
-    return None
+    return {"reason": f"AI 用户名检查：{verdict.reason}", "kind": "ai", "confidence": verdict.confidence}
 
 
 async def reject_request(bot, request, reason: str) -> bool:
