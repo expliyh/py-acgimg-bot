@@ -34,6 +34,31 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def validate_username_words(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        word = value.strip()
+        if not word:
+            continue
+        if len(word) > 100:
+            raise ValueError("用户名敏感词不能超过 100 个字符")
+        key = unicodedata.normalize("NFKC", word).casefold()
+        if key not in seen:
+            result.append(word)
+            seen.add(key)
+    return result
+
+
+class UsernameReviewConfig(StrictModel):
+    sensitive_words: list[str] = Field(default_factory=list, max_length=200)
+
+    @field_validator("sensitive_words")
+    @classmethod
+    def words(cls, values):
+        return validate_username_words(values)
+
+
 class Policy(StrictModel):
     # Bot accounts are handled independently from ordinary member verification.
     # Approval is deliberately on by default; automatic content moderation for
@@ -116,15 +141,7 @@ class Policy(StrictModel):
     @field_validator("username_sensitive_words")
     @classmethod
     def username_words(cls, values):
-        result = []
-        for value in values:
-            word = value.strip()
-            if not word:
-                continue
-            if len(word) > 100:
-                raise ValueError("用户名敏感词不能超过 100 个字符")
-            result.append(word)
-        return list(dict.fromkeys(result))
+        return validate_username_words(values)
 
     @model_validator(mode="after")
     def thresholds(self):

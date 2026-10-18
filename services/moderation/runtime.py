@@ -23,7 +23,7 @@ from models import (
 from registries import engine, user_registry
 from services.telegram_cache import get_cached_admin_ids, invalidate_chat_admins
 
-from . import actions, ai, bot_approval, rules, store, verification
+from . import actions, ai, bot_approval, rules, store, username_review, verification
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,10 @@ async def preprocess(update, context):
         await migrate(message.migrate_from_chat_id, chat.id)
         return
     settings = await store.policy(chat.id)
+    username_cleanup = False
+    if message.new_chat_members or message.left_chat_member:
+        # Capture join message IDs before username screening can remove a user.
+        username_cleanup = await username_review.track_service_message(context.bot, message)
     for member in message.new_chat_members or []:
         await member_joined(
             context.bot,
@@ -69,6 +73,8 @@ async def preprocess(update, context):
             event_id=update.update_id,
             event_source="service",
         )
+    if message.new_chat_members:
+        username_cleanup = await username_review.track_service_message(context.bot, message)
     if message.left_chat_member:
         await member_left(
             chat.id,
@@ -76,7 +82,7 @@ async def preprocess(update, context):
             message.date,
             event_id=update.update_id,
         )
-    if message.left_chat_member and settings.goodbye_enabled:
+    if message.left_chat_member and settings.goodbye_enabled and not username_cleanup:
         await context.bot.send_message(
             chat.id,
             verification.greeting(
@@ -86,7 +92,7 @@ async def preprocess(update, context):
             ),
         )
     if message.new_chat_members or message.left_chat_member:
-        if settings.clean_service_messages:
+        if settings.clean_service_messages and not username_cleanup:
             await store.task(
                 chat.id, "delete", store.now(), {"message_id": message.message_id}
             )
@@ -316,7 +322,9 @@ async def member_joined(bot, chat, user, date, *, event_id=None, event_source=No
                     new_membership=event_id is not None,
                 )
             else:
-                handled = await verification.joined(bot, chat, user, lock_held=True)
+                handled = await verification.joined(
+                    bot, chat, user, lock_held=True, joined_at=date
+                )
         except (ValueError, TelegramError) as exc:
             status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
             await store.event(

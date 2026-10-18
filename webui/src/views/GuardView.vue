@@ -132,6 +132,7 @@ const contentForm = reactive<GuardContent>({
   timezone: "Asia/Shanghai",
 });
 const dueAt = ref("");
+const globalUsernameWords = ref("");
 const aiConfig = ref<AIConfig>({
     base_url: "",
     text_model: "",
@@ -222,7 +223,7 @@ const labels: Record<keyof GuardPolicy, string> = {
   join_auto_approve: "自动批准入群申请",
   join_requests_enabled: "启用入群申请处理",
   username_review_enabled: "启用用户名审核",
-  username_sensitive_words: "用户名敏感词（逗号分隔）",
+  username_sensitive_words: "本群追加用户名敏感词（逗号分隔）",
   username_block_emoji: "禁止含 Emoji 的用户名入群",
   username_block_abnormal_chars: "禁止含异常字符的用户名入群",
   username_ai_check: "启用 AI 用户名检查",
@@ -365,6 +366,7 @@ async function load() {
       guardApi.stats(id),
       guardApi.ai(),
       guardApi.tasks(id),
+      guardApi.usernameConfig(),
     ]);
     if (version !== loadVersion) return;
     groupId.value = id;
@@ -379,6 +381,7 @@ async function load() {
       tasks.value,
     ] = values;
     policySnapshot.value = cloneGuardPolicy(policy.value!);
+    globalUsernameWords.value = values[8].sensitive_words.join("\n");
     // New scheduled announcements should follow the group's configured zone.
     contentForm.timezone = policy.value!.timezone;
     rules.value = values[1].items;
@@ -629,6 +632,17 @@ async function saveAI() {
     apiKey.value = "";
   });
 }
+async function saveUsernameConfig() {
+  await run(async () => {
+    const config = await guardApi.saveUsernameConfig({
+      sensitive_words: globalUsernameWords.value
+        .split(/[,，\n]+/)
+        .map((word) => word.trim())
+        .filter(Boolean),
+    });
+    globalUsernameWords.value = config.sensitive_words.join("\n");
+  }, "全局用户名敏感词已保存，对所有启用用户名审核的群生效");
+}
 watch(reviewPage, (p) => {
   if (policy.value)
     void run(async () => {
@@ -820,13 +834,28 @@ watch(
             </VCol>
           </VRow>
           <p v-if="tab === 'content' || tab === 'join'" class="text-caption">
-            入群审核会在 Join Request 批准前和直接入群事件发生时执行；用户名敏感词不区分大小写。
+            入群审核会在 Join Request 批准前和直接入群事件发生时执行；用户名和显示名均检查全局词库与本群追加词，不区分大小写。本群留空仍继承全局词库。
           </p>
           <VBtn :loading="busy" @click="savePolicy"
             >保存群级设置</VBtn
           ></VCardText
         ></VCard
       >
+      <VCard v-if="tab === 'join'">
+        <VCardTitle>全局用户名敏感词</VCardTitle>
+        <VCardText>
+          <p class="text-body-2 mb-4">
+            所有启用用户名审核的群共用此词库，并叠加各群追加词。修改后下次审核即生效；每份词库最多 200 个词，每词最多 100 个字符。
+          </p>
+          <VTextarea
+            v-model="globalUsernameWords"
+            label="全局敏感词（每行一个，或用逗号分隔）"
+            rows="4"
+            auto-grow
+          />
+          <VBtn :loading="busy" @click="saveUsernameConfig">保存全局敏感词</VBtn>
+        </VCardText>
+      </VCard>
       <VCard v-if="tab === 'rules'"
         ><VCardTitle>审核规则</VCardTitle
         ><VCardText class="d-flex flex-column ga-3">

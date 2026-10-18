@@ -16,7 +16,7 @@ from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
 from services import group_guard
 
-from .schemas import VERIFICATION_MESSAGE_MAX_LENGTH, AIConfig, Policy
+from .schemas import VERIFICATION_MESSAGE_MAX_LENGTH, AIConfig, Policy, UsernameReviewConfig
 
 LEGACY = {
     "verification_enabled",
@@ -25,7 +25,9 @@ LEGACY = {
     "kick_on_timeout",
     "keyword_filter_enabled",
 }
-TEMPORARY_RECORD_KINDS = {"message", "join_seen", "membership_seen"}
+TEMPORARY_RECORD_KINDS = {
+    "message", "join_seen", "membership_seen", "username_service", "username_removal",
+}
 _task_locks = WeakValueDictionary()
 
 
@@ -413,6 +415,17 @@ async def mark_task_phase(task_id: str, phase: str) -> None:
             .values(result=phase[:2000])
         )
         await session.commit()
+
+
+async def username_config() -> UsernameReviewConfig:
+    row = await record(0, "username_config", "default")
+    return UsernameReviewConfig.model_validate(row["data"] if row else {})
+
+
+async def save_username_config(config: UsernameReviewConfig) -> UsernameReviewConfig:
+    async with lock(0):
+        await put_record(0, "username_config", "default", config.model_dump())
+    return config
 
 
 async def ai_config() -> AIConfig:

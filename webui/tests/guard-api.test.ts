@@ -25,6 +25,19 @@ afterEach(() => {
 const group = -1001234567890;
 const root = `/groups/${group}/guard`;
 
+test('global username words use a shared endpoint separate from group additions', async () => {
+  response = { sensitive_words: ['scam'] };
+  assert.equal(await guardApi.usernameConfig(), response);
+  assert.equal(await guardApi.saveUsernameConfig({ sensitive_words: ['scam'] }), response);
+  await guardApi.savePolicy(group, { username_sensitive_words: ['local'] });
+  assert.equal(requests[0].url, '/guard-username');
+  assert.equal(requests[1].url, '/guard-username');
+  assert.equal(requests[1].method, 'put');
+  assert.deepEqual(JSON.parse(requests[1].data), { sensitive_words: ['scam'] });
+  assert.equal(requests[2].url, root);
+  assert.deepEqual(JSON.parse(requests[2].data), { username_sensitive_words: ['local'] });
+});
+
 test('policy saves only changed fields to the selected group', async () => {
   response = { flood_enabled: true, verification_enabled: false };
   assert.equal(await guardApi.savePolicy(group, { flood_enabled: true }), response);

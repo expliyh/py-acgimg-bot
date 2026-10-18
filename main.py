@@ -130,6 +130,7 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
 for router in (
     guard_routes.router,
     guard_routes.model_router,
+    guard_routes.username_router,
     dashboard.router,
     groups.router,
     private.router,

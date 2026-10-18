@@ -460,7 +460,7 @@ async def callback(update, context, parts):
     )
 
 
-async def joined(bot, chat, member, *, lock_held=False):
+async def joined(bot, chat, member, *, lock_held=False, joined_at=None):
     settings = await store.policy(chat.id)
     if member.is_bot:
         from . import bot_approval
@@ -472,7 +472,9 @@ async def joined(bot, chat, member, *, lock_held=False):
         await store.event(chat.id, "username_review", status="failed", user_id=member.id, reason=type(exc).__name__)
         hit = None
     if hit:
-        return await username_review.reject_member(bot, chat, member, hit["reason"])
+        return await username_review.reject_member(
+            bot, chat, member, hit["reason"], joined_at=joined_at, lock_held=lock_held
+        )
     raid = False
     if settings.raid_enabled:
         count = rules.window((chat.id, "joins"), settings.raid_window)

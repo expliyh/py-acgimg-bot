@@ -1,6 +1,9 @@
 import axios from "axios";
 
 const client = axios.create({ baseURL: "/api", timeout: 30000 });
+export interface UsernameReviewConfig {
+  sensitive_words: string[];
+}
 export interface GuardPolicy {
   bot_join_approval_enabled: boolean;
   bot_moderation_enabled: boolean;
@@ -277,6 +280,10 @@ export const guardApi = {
   stats: async (id: number): Promise<GuardStats> =>
     (await client.get(`${base(id)}/stats`)).data,
   ai: async (): Promise<AIConfig> => (await client.get("/guard-ai")).data,
+  usernameConfig: async (): Promise<UsernameReviewConfig> =>
+    (await client.get("/guard-username")).data,
+  saveUsernameConfig: async (value: UsernameReviewConfig): Promise<UsernameReviewConfig> =>
+    (await client.put("/guard-username", value)).data,
   saveAI: async (value: AIConfig): Promise<AIConfig> =>
     (await client.put("/guard-ai", value)).data,
 };

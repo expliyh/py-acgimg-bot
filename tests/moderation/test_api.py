@@ -13,7 +13,7 @@ from defines import MessageType
 from models import Group, GroupChatHistory, GroupGuardSettings, GuardEvent, GuardRecord, GuardTask, User
 from registries import engine
 from services import group_guard
-from services.moderation import reviews, store, verification
+from services.moderation import reviews, store, verification, username_review
 
 
 @pytest.fixture
@@ -29,6 +29,59 @@ async def api(guard_group, guard_bot, monkeypatch):
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
         yield client
+
+
+async def test_global_username_words_are_shared_and_group_additions_stay_isolated(api, guard_group):
+    endpoint = "/api/guard-username"
+    assert (await api.get(endpoint)).json() == {"sensitive_words": []}
+    words = {"sensitive_words": [" ScAm ", "ＳＣＡＭ", "", "广告"]}
+    saved = await api.put(endpoint, json=words)
+    assert saved.status_code == 200
+    assert saved.json() == {"sensitive_words": ["ScAm", "广告"]}
+    assert (await api.get(endpoint)).json() == saved.json()
+
+    for group_id, local in [(guard_group, ["localonly"]), (guard_group + 1, ["otheronly"])]:
+        response = await api.patch(f"/api/groups/{group_id}/guard", json={
+            "username_review_enabled": True, "username_sensitive_words": local,
+        })
+        assert response.status_code == 200
+        settings = await store.policy(group_id)
+        assert settings.username_sensitive_words == local
+        assert await username_review.inspect_with_ai(SimpleNamespace(username="ｓＣＡＭ_user"), settings)
+        assert await username_review.inspect_with_ai(SimpleNamespace(full_name="广告用户"), settings)
+        assert await username_review.inspect_with_ai(SimpleNamespace(username=local[0]), settings)
+    first = await store.policy(guard_group)
+    assert await username_review.inspect_with_ai(SimpleNamespace(username="otheronly"), first) is None
+    await api.patch(f"/api/groups/{guard_group}/guard", json={"username_sensitive_words": []})
+    first = await store.policy(guard_group)
+    assert await username_review.inspect_with_ai(SimpleNamespace(username="scam"), first)
+    assert (await api.get(endpoint)).json() == saved.json()
+    # Changes are read at the next check, including removing global words.
+    assert (await api.put(endpoint, json={"sensitive_words": []})).status_code == 200
+    assert await username_review.inspect_with_ai(SimpleNamespace(username="scam"), first) is None
+    second = await store.policy(guard_group + 1)
+    assert await username_review.inspect_with_ai(SimpleNamespace(username="otheronly"), second)
+    async with engine.new_session() as session:
+        events = (await session.scalars(select(GuardEvent).where(
+            GuardEvent.group_id == 0, GuardEvent.action == "username_config",
+        ))).all()
+        assert len(events) == 2
+        assert all(event.source == "web:deployment-admin" for event in events)
+
+
+@pytest.mark.parametrize("payload", [
+    {"sensitive_words": ["x" * 101]},
+    {"sensitive_words": [str(i) for i in range(201)]},
+    {"sensitive_words": "not a list"},
+    {"sensitive_words": [None]},
+    {"sensitive_words": [], "unknown": True},
+])
+async def test_global_username_words_reject_invalid_config_without_overwriting(api, payload):
+    endpoint = "/api/guard-username"
+    valid = {"sensitive_words": ["keep"]}
+    assert (await api.put(endpoint, json=valid)).status_code == 200
+    assert (await api.put(endpoint, json=payload)).status_code == 422
+    assert (await api.get(endpoint)).json() == valid
 
 
 async def test_web_policy_write_invalidates_telegram_cache_and_rejects_invalid_merge(
