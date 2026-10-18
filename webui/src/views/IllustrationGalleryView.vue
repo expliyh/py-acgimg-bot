@@ -609,7 +609,11 @@ onUnmounted(stopQueuePolling);
                 <VCheckbox :model-value="selectedIds.has(item.id)" class="card-checkbox" density="compact" hide-details aria-label="选择图片" @click.stop @update:model-value="toggleSelect(item.id)" />
                 <img v-if="item.thumbnail_url && item.has_media && !hasMediaError(item.id, 0)" :src="item.thumbnail_url" :alt="imageAlt(item)" loading="lazy" @error="markMediaError(item.id, 0)" @load="clearMediaError(item.id, 0)" />
                 <div v-else class="media-placeholder"><VIcon icon="mdi-image-off-outline" size="42" /><span>{{ item.has_media ? '媒体读取失败' : '暂无已存媒体' }}</span></div>
-                <div class="cover-overlay"><VChip size="x-small" :color="item.source_type === 'pixiv' ? 'primary' : 'secondary'">{{ sourceLabel(item.source_type) }}</VChip><VChip v-if="item.r18g" size="x-small" color="error">R18G</VChip><VChip v-if="item.is_ai" size="x-small" color="info">AI</VChip></div>
+                <div class="cover-overlay">
+                  <VChip size="x-small" variant="flat" :color="item.source_type === 'pixiv' ? 'primary' : 'secondary'">{{ sourceLabel(item.source_type) }}</VChip>
+                  <VChip v-if="item.r18g" size="x-small" variant="flat" color="error">R18G</VChip>
+                  <VChip v-if="item.is_ai" size="x-small" variant="flat" color="info">AI</VChip>
+                </div>
               </div>
               <VCardText class="d-flex flex-column ga-2">
                 <div class="text-subtitle-2 font-weight-bold text-truncate" :title="item.title || item.id">{{ item.title || '未命名图片' }}</div>
