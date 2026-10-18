@@ -283,7 +283,10 @@ async def patch_plan(plan_id: str, payload: PlanPatch):
             else None
         ),
     }
-    config = PushConfig.model_validate(merged)
+    try:
+        config = PushConfig.model_validate(merged)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     config_changed = bool(
         set(values).intersection(
             {"target_scope", "group_ids", "mode", "pid", "pid_by_group"}

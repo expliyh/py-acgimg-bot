@@ -119,7 +119,7 @@ async def get_image_resource(
         resolved_page_id = _resolve_page_id(illust, page_id, allow_random=False)
         link = _resolve_link(illust, resolved_page_id)
         ext = _resolve_extension(illust, resolved_page_id, link)
-        filename = f"{illust.id}_{resolved_page_id}{ext}"
+        filename = f"{illust.id}_{resolved_page_id:02d}{ext}"
         fetcher = file_service.get_file if origin else file_service.get_image
         image = None
         file_id = _resolve_file_id(illust, resolved_page_id, origin=origin)
@@ -144,7 +144,7 @@ async def get_image_resource(
     resolved_page_id = _resolve_page_id(illust, page_id, allow_random=True)
     link = _resolve_link(illust, resolved_page_id)
     ext = _resolve_extension(illust, resolved_page_id, link)
-    filename = f"{illust.id}_{resolved_page_id}{ext}"
+    filename = f"{illust.id}_{resolved_page_id:02d}{ext}"
     image = None
     fetcher = file_service.get_image
 
@@ -175,7 +175,7 @@ def resource_for_illustration(
     resolved_page_id = _resolve_page_id(illust, page_id, allow_random=page_id is None)
     link = _resolve_link(illust, resolved_page_id)
     ext = _resolve_extension(illust, resolved_page_id, link)
-    filename = f"{illust.id}_{resolved_page_id}{ext}"
+    filename = f"{illust.id}_{resolved_page_id:02d}{ext}"
     return ImageResource(
         illustration=illust,
         page_id=resolved_page_id,

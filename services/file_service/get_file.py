@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -61,9 +62,9 @@ async def _copy_local_file(source: Path, destination: Path) -> None:
             await dst.write(chunk)
 
 
-async def _ensure_cached_file(filename: str, url: str | None) -> Path:
+async def _ensure_cached_file(filename: str, url: str | None, *, refresh: bool = False) -> Path:
     cache_path = CACHE_ROOT / filename
-    if cache_path.exists():
+    if cache_path.exists() and not refresh:
         return cache_path
 
     if url is None:
@@ -72,7 +73,7 @@ async def _ensure_cached_file(filename: str, url: str | None) -> Path:
     parsed = urlparse(url)
     if parsed.scheme in {"http", "https"}:
         try:
-            await download_file(filename, url)
+            await download_file(filename, url, replace=refresh)
         except FileExistsError:
             pass
         return cache_path
@@ -91,9 +92,14 @@ async def _ensure_cached_file(filename: str, url: str | None) -> Path:
     dict_lock, lock = file_lock.get_lock(filename)
     async with dict_lock.reader_lock:
         async with lock:
-            if cache_path.exists():
+            if cache_path.exists() and not refresh:
                 return cache_path
-            await _copy_local_file(source_path, cache_path)
+            temporary = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.part")
+            try:
+                await _copy_local_file(source_path, temporary)
+                os.replace(temporary, cache_path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
     return cache_path
 
@@ -160,8 +166,8 @@ async def get_image(filename: str, url: str = None) -> bytes | None:
                 return await f.read()
 
 
-async def get_file(filename: str, url: str = None) -> bytes | None:
-    cache_path = await _ensure_cached_file(filename, url)
+async def get_file(filename: str, url: str = None, *, refresh: bool = False) -> bytes | None:
+    cache_path = await _ensure_cached_file(filename, url, refresh=refresh)
     dict_lock, lock = file_lock.get_lock(filename)
     async with dict_lock.reader_lock:
         async with lock:

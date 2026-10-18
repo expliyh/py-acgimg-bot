@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import String, asc, cast, desc, func, or_, select
 
 from defines import GroupChatMode, GroupStatus
@@ -72,8 +72,6 @@ class GroupDetail(GroupListItem):
 class GroupUpdate(BaseModel):
     """Payload accepted to update a group's configurable options."""
 
-    model_config = ConfigDict(use_enum_values=True)
-
     name: str | None = None
     enable: bool | None = None
     enable_chat: bool | None = None
@@ -82,6 +80,16 @@ class GroupUpdate(BaseModel):
     allow_r18g: bool | None = None
     allow_setu: bool | None = None
     admin_ids: list[int] | None = None
+
+    @field_validator(
+        "enable", "enable_chat", "chat_mode", "sanity_limit", "allow_r18g",
+        "allow_setu", "admin_ids",
+    )
+    @classmethod
+    def reject_null(cls, value):
+        if value is None:
+            raise ValueError("该配置项不能为 null")
+        return value
 
 
 def _apply_filters(stmt, *, search: str | None, enable: bool | None, chat_enabled: bool | None):

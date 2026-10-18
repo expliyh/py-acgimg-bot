@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from b2sdk.v2 import InMemoryAccountInfo, B2Api, FileVersion, Bucket
 
 from registries import config_registry
@@ -36,8 +38,8 @@ class BackBlaze(Storage):
         if missing:
             raise RuntimeError(f"Backblaze configuration missing values: {', '.join(missing)}")
 
-        self.b2_api.authorize_account("production", self.app_id, self.app_key)
-        self.bucket = self.b2_api.get_bucket_by_name(self.bucket_name)
+        await asyncio.to_thread(self.b2_api.authorize_account, "production", self.app_id, self.app_key)
+        self.bucket = await asyncio.to_thread(self.b2_api.get_bucket_by_name, self.bucket_name)
 
     async def upload(self, file: bytes, filename: str, sub_folder: str | None = None) -> str:
         await self.ensure_ready()
@@ -49,7 +51,8 @@ class BackBlaze(Storage):
 
         object_name = self.build_object_path(self.base_path, filename, sub_folder)
         info = {"msg": "Automatic upload by py-acgimg-bot"}
-        file_version: FileVersion = self.bucket.upload_bytes(
+        file_version: FileVersion = await asyncio.to_thread(
+            self.bucket.upload_bytes,
             data_bytes=file,
             file_name=object_name,
             file_info=info,

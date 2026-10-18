@@ -29,10 +29,10 @@ async def guard_set_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user = update.effective_user
     chat = update.effective_chat
 
-    logger.info("Received guard timeout message for user %s", user.id)
-
     if message is None or user is None or chat is None or not message.text:
         return
+
+    logger.info("Received guard timeout message for user %s", user.id)
 
     handler_key = await active_message_handler_registry.get(user.id, group_id=chat.id)
     if not handler_key or not handler_key.startswith(_HANDLER_PREFIX):

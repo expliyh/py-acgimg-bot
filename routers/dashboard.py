@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select, desc
 
@@ -42,7 +42,7 @@ class DashboardSummary(BaseModel):
 
 
 @router.get("/summary", response_model=DashboardSummary)
-async def get_dashboard_summary(limit: int = 10) -> DashboardSummary:
+async def get_dashboard_summary(limit: int = Query(default=10, ge=1, le=100)) -> DashboardSummary:
     """Return summarized metrics and latest activity for the dashboard view."""
 
     async with engine.new_session() as session:

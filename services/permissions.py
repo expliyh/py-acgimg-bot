@@ -21,18 +21,18 @@ def _parse_super_user_ids(value: str | bool | None) -> set[int]:
         if not token:
             continue
         try:
-            ids.add(int(token))
+            user_id = int(token)
+            if user_id > 0:
+                ids.add(user_id)
         except ValueError:
             logger.debug("Skip invalid super user id token: %s", token)
     return ids
 
 
 async def has_super_user_access(user_id: int | None) -> bool:
-    """Return True when the user is allowed to run admin-only commands."""
+    """Allow admin-only commands only for explicitly configured user IDs."""
     config_value = await config_registry.get_config("super_user")
     allowed = _parse_super_user_ids(config_value)
-    if not allowed:
-        return True
     if user_id is None:
         return False
     return user_id in allowed

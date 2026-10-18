@@ -22,7 +22,13 @@ def test_parse_super_user_ids(value, expected):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("configured", "user_id", "expected"),
-    [("10,20", 20, True), ("10,20", 30, False), ("10", None, False), (None, None, True)],
+    [
+        ("10,20", 20, True), ("10,20", 30, False), ("10", None, False),
+        (None, None, False), (None, 30, False), ("", 30, False),
+        (" \n", 30, False), (False, 30, False),
+        ("admin", 30, False), ("@1285315854", 30, False), (True, 30, False),
+        ("0,-10", 30, False), ("invalid,20", 20, True), ("invalid,20", 30, False),
+    ],
 )
 async def test_has_super_user_access(monkeypatch, configured, user_id, expected):
     get_config = AsyncMock(return_value=configured)

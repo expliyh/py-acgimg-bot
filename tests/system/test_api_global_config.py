@@ -162,7 +162,12 @@ async def test_admin_ids_roundtrip_normalizes_and_changes_permission_checks(conf
     assert config_client.put("/api/config/access", json={"super_user": "bad-id"}).status_code == 422
     assert config_client.get("/api/config/access").json()["super_user"] == "123,456"
     assert config_client.put("/api/config/access", json={"super_user": ""}).status_code == 200
-    assert await has_super_user_access(789)
+    assert config_client.get("/api/config/access").json()["super_user"] == ""
+    assert not await has_super_user_access(123)
+    assert not await has_super_user_access(789)
+    assert config_client.put("/api/config/access", json={"super_user": "456"}).status_code == 200
+    assert await has_super_user_access(456)
+    assert not await has_super_user_access(123)
 
 
 async def test_config_migration_is_repeatable_and_preserves_long_values():

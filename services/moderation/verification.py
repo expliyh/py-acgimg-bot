@@ -130,6 +130,16 @@ async def start(
             # An earlier timed restriction may currently be represented by a
             # permanent Telegram mask. Keep its true recovery chain, not that mask.
             snapshot = prior_restriction["data"]["original"]
+            if (
+                previous and previous.state == "restricted"
+                and prior_restriction["data"].get("event_id") == previous.token
+            ):
+                # Tag legacy timeout restrictions before replacing their token.
+                # Retain recovery material if setup or restoration fails.
+                await store.put_record(
+                    group_id, "restriction", str(member.id),
+                    prior_restriction["data"] | {"source": "verification_timeout"},
+                )
         token = secrets.token_hex(12)
         timeout = settings.verification_timeout
         deadline = store.now() + timedelta(seconds=timeout)
@@ -363,13 +373,18 @@ async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
                                 "original": values["original_permissions"] or {},
                                 "state": "active",
                                 "event_id": token,
+                                "source": "verification_timeout",
                             },
                         )
                     status, text = "restricted", "验证超时，保持限制发言"
             else:
                 # A later moderation mute must survive passing verification.
                 restriction = await store.record(group_id, "restriction", str(user_id))
-                if restriction:
+                timeout_restriction = bool(
+                    restriction
+                    and restriction["data"].get("source") == "verification_timeout"
+                )
+                if restriction and not timeout_restriction:
                     await store.put_record(
                         group_id,
                         "restriction",
@@ -378,10 +393,12 @@ async def finish(bot, group_id, user_id, token, *, answer=None, expired=False):
                         | {"original": values["original_permissions"] or {}},
                     )
                 else:
-                    await actions.restore_permissions(
+                    deferred = await actions.restore_permissions(
                         bot, group_id, user_id, values["original_permissions"] or {},
                         verification_token=token
                     )
+                    if timeout_restriction and not deferred:
+                        await store.remove_record(group_id, "restriction", str(user_id))
         except (TelegramError, ValueError) as exc:
             status = "uncertain" if actions.is_uncertain_error(exc) else "failed"
             text = (

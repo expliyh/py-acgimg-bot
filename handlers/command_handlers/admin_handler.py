@@ -6,7 +6,7 @@ from telegram.constants import ParseMode
 
 import messase_generator
 from utils import is_group_type, delete_messages
-from registries import user_registry, group_registry, engine
+from services.permissions import has_super_user_access
 from handlers.callback_handlers.panel_utils import register_panel
 from services.command_history import command_logger
 from handlers.registry import bot_handler
@@ -21,8 +21,12 @@ async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE)
     :param context:
     :return: None
     """
+    if update.effective_user is None or update.effective_chat is None or update.effective_message is None:
+        return
+    if not await has_super_user_access(update.effective_user.id):
+        await update.effective_message.reply_text("您没有权限使用此命令。")
+        return
     is_group = is_group_type(update.effective_chat.type)
-    user = await user_registry.get_user_by_id(update.effective_user.id)
     if is_group:
         message: Message = await context.bot.send_message(
             chat_id=update.effective_chat.id,

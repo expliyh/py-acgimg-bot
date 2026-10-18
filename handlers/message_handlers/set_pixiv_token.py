@@ -11,6 +11,7 @@ from registries import active_message_handler_registry, config_registry
 from services import pixiv
 
 from handlers.callback_handlers.conf_handlers.bot.panel import refresh_bot_config_panel
+from services.permissions import has_super_user_access
 from handlers.registry import message_handler
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,11 @@ async def set_pixiv_token(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     handler_key = await active_message_handler_registry.get(user.id)
     if not handler_key or not handler_key.startswith(_HANDLER_PREFIX):
+        return
+
+    if message.chat.type != "private" or not await has_super_user_access(user.id):
+        await active_message_handler_registry.delete(user_id=user.id)
+        await message.reply_text("您没有权限修改机器人配置。")
         return
 
     parts = handler_key.split(":")
