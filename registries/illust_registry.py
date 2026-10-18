@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import Illustration
 
 from .engine import engine
+from . import config_registry
 
 
 async def get_illust_info(pixiv_id: int) -> Illustration | None:
@@ -18,6 +19,7 @@ async def get_illust_info(pixiv_id: int) -> Illustration | None:
 
 
 async def random_illust(sanity_limit: int = 5, r18g: bool = False):
+    r18g = r18g and await config_registry.is_r18g_allowed()
     async with engine.new_session() as session:
         session: AsyncSession = session
 

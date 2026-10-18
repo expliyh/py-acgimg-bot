@@ -23,6 +23,12 @@ async def p_info_func(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             reply_to_message_id=update.message.message_id,
         )
         return
+    if not context.args:
+        await update.message.reply_text(
+            text="用法：/pinfo <Pixiv 作品 ID>",
+            reply_to_message_id=update.message.message_id,
+        )
+        return
     pixiv_id = context.args[0]
     illust = await pixiv.get_illust_info_by_pixiv_id(pixiv_id)
     await update.message.reply_markdown(

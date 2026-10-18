@@ -24,7 +24,7 @@ async def callback_handler_func(update: Update, context: ContextTypes.DEFAULT_TY
     command = parts[0]
     handler = handler_map.get(command)
     if handler is None:
-        await query.answer("δ֪������", show_alert=True)
+        await query.answer("未知的操作", show_alert=True)
         return
 
     await handler(update, context, parts[1:])

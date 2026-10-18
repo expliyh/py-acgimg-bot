@@ -195,7 +195,7 @@ async def import_illustration(
             ext = f".{ext}"
 
         filename = f"{illust.id}_{page_index:02d}{ext}"
-        file_bytes = await get_file(filename=filename, url=origin_url)
+        file_bytes = await get_file(filename=filename, url=origin_url, refresh=True)
         if file_bytes is None:
             raise RuntimeError(f"无法下载第{page_index + 1} 页的图片")
 
@@ -225,7 +225,7 @@ async def import_illustration(
                 filename,
                 cleanup=cleanup_messages,
             )
-        elif not telegram_cache_enabled:
+        else:
             compressed_id = existing_compressed_ids[page_index]
             original_id = existing_original_ids[page_index]
 

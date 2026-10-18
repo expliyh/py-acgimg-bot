@@ -1,5 +1,7 @@
-import asyncio
+import logging
 import os
+import uuid
+from pathlib import Path
 
 import aiofiles
 import aiohttp
@@ -7,41 +9,39 @@ import aiohttp
 from . import file_lock
 from .conf import file_path
 
+logger = logging.getLogger(__name__)
+
 
 async def download_file(filename: str, url: str, replace: bool = False):
     dict_lock, lock = file_lock.get_lock(filename)
-    file_url = file_path + filename
+    destination = Path(file_path) / filename
     async with dict_lock.reader_lock:
         async with lock:
-            if os.path.exists(file_url):
-                if not replace:
-                    raise FileExistsError
-                else:
-                    os.remove(file_url)
-            retries = 5
-            attempt = 0
-            while attempt < retries:
-                try:
-                    # 创建一个 ClientTimeout 对象
-                    timeout_settings = aiohttp.ClientTimeout(total=10)
-                    async with aiohttp.ClientSession(timeout=timeout_settings) as session:
-                        # Pixiv 的资源接口需要带 Referer 头，否则会返回 403。
-                        headers = {"Referer": "https://app-api.pixiv.net/"}
-                        async with session.get(url, headers=headers) as response:
-                            if response.status == 200:
-                                # 打开文件准备写入
-                                async with aiofiles.open(file_url, 'wb') as f:
-                                    await f.write(await response.content.read())
-                                return
-                            else:
-                                response.raise_for_status()
-                except aiohttp.ClientError as e:
-                    print(f"Attempt {attempt} failed: {e}")
-                    attempt += 1
-                    if attempt >= retries:
-                        try:
-                            os.remove(file_url)
-                        except FileNotFoundError as _:
-                            pass
-                        print(f"Failed to download file after {retries} attempts.")
-                        raise e
+            if destination.exists() and not replace:
+                raise FileExistsError
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_name(f"{destination.name}.{uuid.uuid4().hex}.part")
+            try:
+                retries = 5
+                for attempt in range(1, retries + 1):
+                    try:
+                        timeout = aiohttp.ClientTimeout(total=10)
+                        async with aiohttp.ClientSession(timeout=timeout) as session:
+                            headers = {"Referer": "https://app-api.pixiv.net/"}
+                            async with session.get(url, headers=headers) as response:
+                                if response.status != 200:
+                                    response.raise_for_status()
+                                    raise aiohttp.ClientError(
+                                        f"Unexpected download status: {response.status}"
+                                    )
+                                data = await response.content.read()
+                                async with aiofiles.open(temporary, "wb") as file:
+                                    await file.write(data)
+                        os.replace(temporary, destination)
+                        return
+                    except (aiohttp.ClientError, TimeoutError):
+                        logger.debug("Download attempt %s/%s failed", attempt, retries, exc_info=True)
+                        if attempt == retries:
+                            raise
+            finally:
+                temporary.unlink(missing_ok=True)

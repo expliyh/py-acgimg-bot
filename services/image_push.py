@@ -17,7 +17,7 @@ from telegram.error import NetworkError, RetryAfter, TelegramError, TimedOut
 
 from defines import GroupStatus
 from models import Group, ImagePushBatch, ImagePushDelivery, ImagePushPlan, Illustration
-from registries import engine, illust_registry
+from registries import engine, illust_registry, config_registry
 from services import pixiv
 from services.illustration_importer import import_illustration
 from services.image_service import resource_for_illustration
@@ -412,6 +412,8 @@ async def _image_policy_reason(group_id: int, illust: Illustration) -> str | Non
         return "图片过滤等级超过该群限制"
     if illust.r18g and not group.allow_r18g:
         return "该群不允许 R18G 图片"
+    if illust.r18g and not await config_registry.is_r18g_allowed():
+        return "全局配置不允许 R18G 图片"
     return None
 
 

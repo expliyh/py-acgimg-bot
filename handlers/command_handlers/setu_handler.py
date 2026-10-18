@@ -12,7 +12,7 @@ from exps import UserBlockedError, GroupBlockedError
 
 from utils import is_group_type
 
-from registries import user_registry, group_registry, illust_registry
+from registries import user_registry, group_registry, illust_registry, config_registry
 from services.command_history import command_logger
 from services.image_service import ImageResource, get_image_resource
 from services.image_push import send_illustration_photo
@@ -89,7 +89,7 @@ async def setu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             raise GroupBlockedError("本群组已关闭涩图功能")
 
     sanity_limit = user.sanity_limit
-    allow_r18g = user.allow_r18g
+    allow_r18g = user.allow_r18g and await config_registry.is_r18g_allowed()
     if is_group and group is not None:
         sanity_limit = min(sanity_limit, group.sanity_limit)
         allow_r18g = allow_r18g and group.allow_r18g

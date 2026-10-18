@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import String, asc, cast, desc, func, or_, select
 
 from defines import MessageType, UserStatus
@@ -65,13 +65,18 @@ class PrivateUserDetail(PrivateUserListItem):
 
 
 class PrivateUserUpdate(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
-
     nick_name: str | None = None
     enable_chat: bool | None = None
     sanity_limit: int | None = Field(default=None, ge=0)
     allow_r18g: bool | None = None
     status: UserStatus | None = None
+
+    @field_validator("enable_chat", "sanity_limit", "allow_r18g", "status")
+    @classmethod
+    def reject_null(cls, value):
+        if value is None:
+            raise ValueError("该配置项不能为 null")
+        return value
 
 
 def _apply_filters(stmt, *, search: str | None, chat_enabled: bool | None, status: UserStatus | None):

@@ -128,9 +128,9 @@ async def message_handler_foreach(update: Update, context: ContextTypes.DEFAULT_
                 await handler.handle_update(update, context)
             else:
                 pending_list.append(asyncio.create_task(handler.handle_update(update, context)))
-        if handler.block:
-            await asyncio.gather(*pending_list)
-            return
+            if handler.block:
+                await asyncio.gather(*pending_list)
+                return
     await asyncio.gather(*pending_list)
 
 

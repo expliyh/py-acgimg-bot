@@ -164,6 +164,13 @@ async def get_config(key: str) -> str | bool | None:
     return None
 
 
+async def is_r18g_allowed() -> bool:
+    value = await get_config("allow_r18g")
+    return value is True or (
+        isinstance(value, str) and value.strip().lower() in {"true", "1", "yes", "y", "on"}
+    )
+
+
 async def get_bot_tokens() -> list[Token]:
     configs = await get_configs("bot_token")
     if not configs:

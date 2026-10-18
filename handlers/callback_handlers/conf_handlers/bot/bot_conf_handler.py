@@ -2,6 +2,7 @@
 from telegram.ext import ContextTypes
 
 from handlers.callback_handlers.panel_utils import close_panel
+from services.permissions import has_super_user_access
 
 from .cache import handle_cache
 from .feature_flags import handle_feature_flag
@@ -31,6 +32,11 @@ handler_map = {
 async def bot_conf_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: list[str]):
     query = update.callback_query
     if query is None or not cmd:
+        return
+
+    user = update.effective_user
+    if user is None or not await has_super_user_access(user.id):
+        await query.answer("您没有权限修改机器人配置。", show_alert=True)
         return
 
     section = cmd[0]
