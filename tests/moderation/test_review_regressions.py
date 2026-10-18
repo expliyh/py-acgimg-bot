@@ -434,7 +434,7 @@ async def test_only_relevant_content_enters_ai_queue(
     guard_group, guard_bot, guard_message, policy, content, queued
 ):
     await store.save_policy(guard_group, policy)
-    await configure_ai(base_url="http://127.0.0.1:9/v1", vision_model="test-vision")
+    await configure_ai(base_url="http://127.0.0.1:9/v1", text_model="test-text", vision_model="test-vision")
     message = guard_message(**content)
     await runtime.preprocess(Update(1, message=message), SimpleNamespace(bot=guard_bot))
     async with engine.new_session() as session:

@@ -477,15 +477,10 @@ async def save_ai_config(config: AIConfig) -> dict:
     return config.model_dump()
 
 
-async def ai_selection(settings, key):
+async def ai_selection(settings, key, *, defaults=None):
     selection = getattr(settings, key, None)
-    return selection if selection else getattr(await ai_config(), key)
+    return selection if selection else getattr(defaults if defaults is not None else await ai_config(), key)
 
 
-async def resolve_ai(settings, key):
-    return await providers.resolve(await ai_selection(settings, key))
-
-
-async def ai_enabled(settings):
-    defaults = await ai_config()
-    return any(getattr(settings, key, None) or getattr(defaults, key) for key in ("ai_text", "ai_vision"))
+async def resolve_ai(settings, key, *, defaults=None, catalogue=None):
+    return await providers.resolve(await ai_selection(settings, key, defaults=defaults), catalogue)

@@ -221,7 +221,7 @@ async def preprocess(update, context):
         await log_message_update(update, context)
         raise ApplicationHandlerStop
     if ai.should_classify(message, settings):
-        if await store.ai_enabled(settings):
+        if await ai.prepare(message, settings) is not None:
             async with engine.new_session() as session:
                 pending = await session.scalar(
                     select(func.count())

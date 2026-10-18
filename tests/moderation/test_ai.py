@@ -7,6 +7,7 @@ import base64
 import io
 import json
 import warnings
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,11 +15,12 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select
+from telegram import Update
 
-from models import Group, GuardEvent
+from models import Group, GuardEvent, GuardTask
 from registries import engine
-from services.moderation import ai, store, worker
-from services.moderation.schemas import AIVerdict, Policy
+from services.moderation import ai, runtime, store, worker
+from services.moderation.schemas import AIConfig, AIVerdict, Policy
 
 
 def photo(file_size=100):
@@ -437,6 +439,54 @@ async def test_failed_call_consumes_budget_but_never_warns(
         assert event.data == {"error": "TimeoutError"}
 
 
+@pytest.mark.parametrize("enabled", ["ai_text", "ai_vision"])
+async def test_missing_message_model_skips_queue_and_budget(
+    guard_group, guard_bot, guard_ai_job, guard_message, monkeypatch, enabled,
+):
+    policy = {"ai_spam": True, "ai_images": True, "ai_daily_limit": 1}
+    image = {"text": None, "photo": photo()}
+    skipped_values = {} if enabled == "ai_vision" else image
+    enabled_values = image if enabled == "ai_vision" else {}
+    skipped = await guard_ai_job(policy=policy, **skipped_values)
+    accepted = await guard_ai_job(policy=policy, message_id=11, **enabled_values)
+    defaults = await store.ai_config()
+    await store.save_ai_config(AIConfig(**{enabled: getattr(defaults, enabled)}))
+    classifier = AsyncMock(return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {}))
+    monkeypatch.setattr(ai, "classify", classifier)
+    monkeypatch.setattr(ai, "image_data", AsyncMock(return_value="data:image/jpeg;base64,dGVzdA=="))
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=None))
+
+    await runtime.preprocess(Update(1, message=guard_message(**skipped_values)), SimpleNamespace(bot=guard_bot))
+    async with engine.new_session() as session:
+        assert await session.scalar(select(GuardTask).where(GuardTask.kind == "ai")) is None
+    assert await ai.process(guard_bot, skipped) == "skipped"
+    async with engine.new_session() as session:
+        assert await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai")) is None
+    assert await ai.process(guard_bot, accepted) == "allow"
+    classifier.assert_awaited_once()
+    async with engine.new_session() as session:
+        events = (await session.scalars(select(GuardEvent).where(GuardEvent.action == "ai"))).all()
+        assert len(events) == 1 and events[0].status == "success"
+
+
+async def test_missing_vision_model_checks_caption_with_text_provider(
+    guard_bot, guard_ai_job, monkeypatch,
+):
+    job = await guard_ai_job(policy={"ai_images": True}, text=None, caption="ordinary caption", photo=photo())
+    defaults = await store.ai_config()
+    await store.save_ai_config(AIConfig(ai_text=defaults.ai_text))
+    downloader = AsyncMock()
+    classifier = AsyncMock(return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {}))
+    monkeypatch.setattr(ai, "image_data", downloader)
+    monkeypatch.setattr(ai, "classify", classifier)
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=None))
+    assert await ai.process(guard_bot, job) == "allow"
+    downloader.assert_not_awaited()
+    config, settings, text, image, _ = classifier.await_args.args
+    assert config.model == defaults.ai_text.model
+    assert text == "ordinary caption" and image is None and not settings.ai_images
+
+
 async def test_image_document_uses_caption_and_known_permitted_grade(
     guard_bot, guard_ai_job, monkeypatch
 ):
@@ -497,6 +547,7 @@ async def test_known_grade_does_not_require_download_or_models(
         document={"file_id": "known", "file_unique_id": "known", "mime_type": "image/png"},
     )
     await configure_ai(base_url="http://127.0.0.1:9/v1")
+    await store.save_ai_config(AIConfig())
     async with engine.new_session() as session:
         group = await session.get(Group, guard_group)
         group.sanity_limit, group.allow_r18g = limit, allow_gore

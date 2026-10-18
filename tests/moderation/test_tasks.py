@@ -1,6 +1,7 @@
 """Persisted task recovery, scheduling boundaries and worker cancellation."""
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -10,7 +11,7 @@ from telegram import User
 from telegram.error import BadRequest, RetryAfter, TimedOut
 
 from models import GroupGuardPendingVerification as Pending
-from models import GuardEvent, GuardTask
+from models import Group, GuardEvent, GuardTask
 from registries import engine
 from services.moderation import actions, ai, store, verification, worker
 from services.moderation.schemas import ActionRequest, AIVerdict, Content, Policy
@@ -406,10 +407,9 @@ async def test_recovery_continues_claimed_recurring_announcement_without_resend(
 
 
 async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
-    guard_group, guard_bot, monkeypatch
+    guard_group, guard_bot, guard_ai_job, monkeypatch
 ):
-    from ai_helpers import configure_ai
-    await configure_ai(base_url="http://127.0.0.1:9/v1", text_model="test")
+    job = await guard_ai_job()
     started = asyncio.Event()
     release = asyncio.Event()
     active, cancelled = set(), set()
@@ -425,7 +425,7 @@ async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
 
     monkeypatch.setattr(ai, "process", slow_classifier)
     for _ in range(4):
-        await store.task(guard_group, "ai", store.now(), {})
+        await store.task(guard_group, "ai", store.now(), job["data"])
     running = worker.Worker(guard_bot)
     try:
         await running.tick()
@@ -441,6 +441,78 @@ async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
     assert cancelled == active
     await worker.Worker(guard_bot).recover()
     assert sum(row["state"] == "pending" for row in await jobs()) == 4
+
+
+@pytest.mark.parametrize("backlog", [2, 105])
+async def test_provider_backlog_does_not_block_other_provider(
+    guard_group, guard_bot, guard_message, monkeypatch, backlog,
+):
+    from services.ai import providers
+    from services.ai.client import provider_slot
+    from services.ai.schemas import ProviderInput
+    other_group = guard_group - 1
+    async with engine.new_session() as session:
+        session.add(Group(id=other_group))
+        await session.commit()
+    first, second = [await providers.save(ProviderInput(
+        name=name, base_url="http://127.0.0.1:9/v1", models=[{"id": "text"}], concurrency=1,
+    )) for name in ("A", "B")]
+    for group_id, provider in [(guard_group, first), (other_group, second)]:
+        await store.save_policy(group_id, {"ai_spam": True, "ai_text": {"provider_id": provider.id, "model": "text"}})
+    message = json.loads(guard_message().to_json())
+    clock = store.now()
+    # Stable ordering, including a second page of A jobs before the B job.
+    async with engine.new_session() as session:
+        first_ids = []
+        for index in range(backlog + 1):
+            task_id = store.uid()
+            group_id = guard_group if index < backlog else other_group
+            session.add(GuardTask(
+                id=task_id, group_id=group_id, kind="ai", state="pending",
+                due_at=clock - timedelta(seconds=backlog + 1 - index), created_at=clock,
+                data={"message": message | {"chat": message["chat"] | {"id": group_id}}},
+            ))
+            if index < backlog:
+                first_ids.append(task_id)
+            else:
+                second_id = task_id
+        await session.commit()
+    started = {first.id: asyncio.Event(), second.id: asyncio.Event()}
+    release = asyncio.Event()
+    active, maximum = {}, {}
+    async def classify(bot, job):
+        config = await store.resolve_ai(await store.policy(job["group_id"]), "ai_text")
+        async with provider_slot(config):
+            key = config.provider_id
+            active[key] = active.get(key, 0) + 1
+            maximum[key] = max(maximum.get(key, 0), active[key])
+            started[key].set()
+            try:
+                await release.wait()
+            finally:
+                active[key] -= 1
+        return "allow"
+    monkeypatch.setattr(ai, "process", classify)
+    running = worker.Worker(guard_bot)
+    try:
+        await running.tick()
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), 5)
+        await running.tick()
+        states = {row["id"]: row["state"] for row in await jobs()}
+        assert states[second_id] == "running"
+        assert [states[key] for key in first_ids].count("running") == 1
+        assert [states[key] for key in first_ids].count("pending") == backlog - 1
+        assert len(running.children) == 2
+        release.set()
+        await asyncio.gather(*running.children)
+        await running.tick()
+        await asyncio.gather(*running.children)
+        assert maximum == {first.id: 1, second.id: 1}
+        states = {row["id"]: row["state"] for row in await jobs()}
+        assert states[first_ids[1]] == "done" and states[second_id] == "done"
+    finally:
+        release.set()
+        await running.stop()
 
 
 @pytest.mark.parametrize("event_action", ["ai", "image_grade"])

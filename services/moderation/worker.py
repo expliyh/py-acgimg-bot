@@ -2,10 +2,12 @@
 
 import asyncio
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
+from telegram import Message
 from telegram.error import RetryAfter
 
 from models import GroupGuardPendingVerification as Pending
@@ -119,6 +121,7 @@ class Worker:
     def __init__(self, bot):
         self.bot, self.runner = bot, None
         self.children = set()
+        self.child_providers = {}
         self.last_cleanup = None
 
     async def start(self):
@@ -357,8 +360,63 @@ class Worker:
                 logger.exception("Moderation worker tick failed")
             await asyncio.sleep(1)
 
+    async def pending_ai_jobs(self):
+        """Reserve worker slots per provider, scanning past saturated queues."""
+        catalogue = await providers.all_providers()
+        defaults = await store.ai_config()
+        limits = {provider.id: provider.concurrency for provider in catalogue}
+        # Local grading and obsolete/unconfigured jobs need a bounded lane too.
+        limits[None] = max(1, sum(limits.values()))
+        occupied = Counter(
+            provider_id for child, provider_id in self.child_providers.items() if not child.done()
+        )
+        policies = {}
+        selected = []
+        cursor = None
+        now = store.now()
+        while any(occupied[key] < limit for key, limit in limits.items()):
+            query = select(GuardTask).where(
+                GuardTask.state == "pending", GuardTask.kind == "ai", GuardTask.due_at <= now,
+            )
+            if cursor is not None:
+                due_at, task_id = cursor
+                query = query.where(or_(
+                    GuardTask.due_at > due_at,
+                    and_(GuardTask.due_at == due_at, GuardTask.id > task_id),
+                ))
+            async with engine.new_session() as session:
+                rows = (await session.scalars(query.order_by(GuardTask.due_at, GuardTask.id).limit(100))).all()
+                batch = [store.dump(row) for row in rows]
+            if not batch:
+                break
+            for job in batch:
+                group_id = job["group_id"]
+                if group_id not in policies:
+                    policies[group_id] = await store.policy(group_id)
+                try:
+                    raw_message = job["data"].get("message")
+                    message = Message.de_json(raw_message, self.bot) if isinstance(raw_message, dict) else None
+                    plan = (
+                        await ai.prepare(message, policies[group_id], defaults=defaults, catalogue=catalogue, group_id=group_id)
+                        if message else None
+                    )
+                except (ValueError, TypeError, KeyError):
+                    # Let normal dispatch persist the malformed task's failure.
+                    plan = None
+                provider_id = plan.config.provider_id if plan and plan.config else None
+                if occupied[provider_id] < limits.get(provider_id, 0):
+                    selected.append((job, provider_id))
+                    occupied[provider_id] += 1
+            cursor = (batch[-1]["due_at"], batch[-1]["id"])
+            if len(batch) < 100:
+                break
+        return selected
+
+    def child_finished(self, child):
+        self.children.discard(child)
+        self.child_providers.pop(child, None)
+
     async def tick(self):
-        capacity = await providers.capacity()
         async with engine.new_session() as session:
             due = (
                 await session.scalars(
@@ -372,20 +430,9 @@ class Worker:
                     .limit(20)
                 )
             ).all()
-            ai_jobs = (
-                await session.scalars(
-                    select(GuardTask)
-                    .where(
-                        GuardTask.state == "pending",
-                        GuardTask.kind == "ai",
-                        GuardTask.due_at <= store.now(),
-                    )
-                    .order_by(GuardTask.due_at)
-                    .limit(max(0, capacity - len(self.children)))
-                )
-            ).all()
-            jobs = [store.dump(job) for job in [*due, *ai_jobs]]
-        for job in jobs:
+            jobs = [(store.dump(job), None) for job in due]
+        jobs.extend(await self.pending_ai_jobs())
+        for job, provider_id in jobs:
             async with engine.new_session() as session:
                 result = await session.execute(
                     update(GuardTask)
@@ -402,7 +449,8 @@ class Worker:
             if job["kind"] == "ai":
                 child = asyncio.create_task(self.dispatch(job))
                 self.children.add(child)
-                child.add_done_callback(self.children.discard)
+                self.child_providers[child] = provider_id
+                child.add_done_callback(self.child_finished)
             else:
                 await self.dispatch(job)
         if self.last_cleanup is None or self.last_cleanup < store.now() - timedelta(

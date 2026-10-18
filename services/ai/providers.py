@@ -48,10 +48,11 @@ async def validate_selection(selection: AISelection | None, catalogue=None, *, f
         raise ValueError("所选模型不支持此功能所需的输入类型或文本输出")
 
 
-async def resolve(selection: AISelection | None) -> AIRequestConfig | None:
+async def resolve(selection: AISelection | None, catalogue=None) -> AIRequestConfig | None:
     if selection is None:
         return None
-    provider = next((p for p in await all_providers() if p.id == selection.provider_id), None)
+    catalogue = await all_providers() if catalogue is None else catalogue
+    provider = next((p for p in catalogue if p.id == selection.provider_id), None)
     # A stale selection must never silently use another provider or model.
     model = next((m for m in provider.models if m.id == selection.model), None) if provider else None
     if model is None:
@@ -116,10 +117,6 @@ async def remove(provider_id: str):
             raise LookupError("AI 提供商不存在")
         await _check_references(updated)
         await _write(updated)
-
-
-async def capacity() -> int:
-    return max(1, sum(provider.concurrency for provider in await all_providers()))
 
 
 async def migrate_legacy_config():
