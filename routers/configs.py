@@ -27,13 +27,11 @@ class StorageSettings(BaseModel):
     local_storage_root: ConfigText = "storage"
     local_storage_base_url: ConfigText = ""
     backblaze_app_id: ConfigText = ""
-    backblaze_app_key: ConfigSecret = ""
     backblaze_bucket_name: ConfigText = ""
     backblaze_base_path: ConfigText = ""
     backblaze_base_url: ConfigText = ""
     webdav_endpoint: ConfigText = ""
     webdav_username: ConfigText = ""
-    webdav_password: ConfigSecret = ""
     webdav_base_path: ConfigText = ""
     webdav_public_url: ConfigText = ""
 
@@ -49,16 +47,21 @@ class StorageSettings(BaseModel):
         return value.rstrip("/")
 
 
+class PublicStorageSettings(StorageSettings):
+    has_backblaze_app_key: bool = False
+    has_webdav_password: bool = False
+
+
 class StorageSettingsUpdate(StorageSettings):
+    backblaze_app_key: ConfigSecret | None = Field(None, repr=False)
+    webdav_password: ConfigSecret | None = Field(None, repr=False)
+    clear_backblaze_app_key: bool = False
+    clear_webdav_password: bool = False
+
     @model_validator(mode="after")
     def active_provider(self):
         if self.storage_service_use == "webdav" and not self.webdav_endpoint:
             raise ValueError("使用 WebDAV 时必须填写服务地址")
-        if self.storage_service_use == "backblaze" and not all((
-            self.backblaze_app_id, self.backblaze_app_key,
-            self.backblaze_bucket_name, self.backblaze_base_url,
-        )):
-            raise ValueError("使用 Backblaze B2 时必须填写 Key ID、Key、存储桶和公开访问地址")
         return self
 
 
@@ -99,8 +102,7 @@ class AccessSettings(BaseModel):
         return ",".join(dict.fromkeys(str(int(item)) for item in ids))
 
 
-@router.get("/storage", response_model=StorageSettings)
-async def get_storage_settings():
+async def _storage_values():
     values = {}
     for key, default in STORAGE_CONFIG_DEFAULTS.items():
         value = await config_registry.get_config(key)
@@ -110,16 +112,39 @@ async def get_storage_settings():
     return values
 
 
-@router.put("/storage", response_model=StorageSettings)
+def _public_storage(values):
+    values = dict(values)
+    for key in ("backblaze_app_key", "webdav_password"):
+        values["has_" + key] = bool(values.pop(key, ""))
+    return PublicStorageSettings(**values)
+
+
+@router.get("/storage", response_model=PublicStorageSettings)
+async def get_storage_settings():
+    return _public_storage(await _storage_values())
+
+
+@router.put("/storage", response_model=PublicStorageSettings)
 async def save_storage_settings(payload: StorageSettingsUpdate):
     from services import storage_service
     from services.file_service.get_file import reset_local_storage_root
 
-    await config_registry.update_configs(payload.model_dump())
+    values = payload.model_dump(exclude={
+        "backblaze_app_key", "webdav_password", "clear_backblaze_app_key", "clear_webdav_password",
+    })
+    saved = await _storage_values()
+    for key in ("backblaze_app_key", "webdav_password"):
+        secret = getattr(payload, key)
+        values[key] = "" if getattr(payload, "clear_" + key) else secret or saved[key]
+    if values["storage_service_use"] == "backblaze" and not all(
+        values[key] for key in ("backblaze_app_id", "backblaze_app_key", "backblaze_bucket_name", "backblaze_base_url")
+    ):
+        raise HTTPException(422, "使用 Backblaze B2 时必须填写 Key ID、Key、存储桶和公开访问地址")
+    await config_registry.update_configs(values)
     for provider in (storage_service.local_storage, storage_service.backblaze, storage_service.webdav_storage):
         await provider.invalidate_config()
     reset_local_storage_root()
-    return payload
+    return _public_storage(values)
 
 
 @router.get("/cache", response_model=CacheSettings)

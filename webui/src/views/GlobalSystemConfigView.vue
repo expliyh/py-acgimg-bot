@@ -9,6 +9,9 @@ import {
 const props = defineProps<{ section: SystemConfigSection }>();
 const { toast } = useFeedback();
 const values = ref<SystemConfigValues>({});
+const storedSecrets = ref<Record<string, boolean>>({});
+const clearSecrets = ref<Record<string, boolean>>({});
+const storageSecrets = ['backblaze_app_key', 'webdav_password'];
 const loading = ref(false);
 const saving = ref(false);
 const loaded = ref(false);
@@ -21,6 +24,7 @@ interface ConfigField {
   type?: 'password' | 'number' | 'textarea';
   min?: number;
   hint?: string;
+  secret?: boolean;
   options?: { title: string; value: string }[];
 }
 interface ConfigGroup { title: string; fields: ConfigField[] }
@@ -44,7 +48,7 @@ const sections: Record<SystemConfigSection, ConfigSection> = {
       ] },
       { title: 'Backblaze B2', fields: [
         { key: 'backblaze_app_id', label: 'Application Key ID' },
-        { key: 'backblaze_app_key', label: 'Application Key', type: 'password' },
+        { key: 'backblaze_app_key', label: 'Application Key', type: 'password', secret: true },
         { key: 'backblaze_bucket_name', label: '存储桶名称' },
         { key: 'backblaze_base_path', label: '存储前缀（可选）' },
         { key: 'backblaze_base_url', label: '公开访问地址' },
@@ -52,7 +56,7 @@ const sections: Record<SystemConfigSection, ConfigSection> = {
       { title: 'WebDAV', fields: [
         { key: 'webdav_endpoint', label: 'WebDAV 服务地址' },
         { key: 'webdav_username', label: '用户名（可选）' },
-        { key: 'webdav_password', label: '密码', type: 'password' },
+        { key: 'webdav_password', label: '密码', type: 'password', secret: true },
         { key: 'webdav_base_path', label: '存储前缀（可选）' },
         { key: 'webdav_public_url', label: '公开访问地址（可选）' },
       ] },
@@ -79,6 +83,20 @@ const sections: Record<SystemConfigSection, ConfigSection> = {
 };
 const section = computed(() => sections[props.section]);
 
+function applyResult(key: SystemConfigSection, result: SystemConfigValues) {
+  const next = { ...result };
+  storedSecrets.value = {};
+  clearSecrets.value = {};
+  if (key === 'storage') {
+    for (const secret of storageSecrets) {
+      storedSecrets.value[secret] = next[`has_${secret}`] === true;
+      delete next[`has_${secret}`];
+      next[secret] = '';
+    }
+  }
+  values.value = next;
+}
+
 function errorMessage(value: unknown): string {
   const response = value as { response?: { data?: { error?: { message?: string; fields?: Record<string, string[]> } } } };
   const detail = response.response?.data?.error;
@@ -96,7 +114,7 @@ async function load() {
   try {
     const result = await fetchSystemConfig(key);
     if (version !== loadVersion) return;
-    values.value = result;
+    applyResult(key, result);
     loaded.value = true;
   } catch (value) {
     if (version === loadVersion) error.value = errorMessage(value);
@@ -112,9 +130,13 @@ async function save() {
   saving.value = true;
   error.value = '';
   try {
-    const result = await saveSystemConfig(key, values.value);
+    const payload = { ...values.value };
+    if (key === 'storage') {
+      for (const secret of storageSecrets) payload[`clear_${secret}`] = !!clearSecrets.value[secret];
+    }
+    const result = await saveSystemConfig(key, payload);
     if (version !== loadVersion) return;
-    values.value = result;
+    applyResult(key, result);
     toast.add({ severity: 'success', summary: '已保存', detail: `${sections[key].title}已更新。` });
   } catch (value) {
     if (version === loadVersion) error.value = errorMessage(value);
@@ -142,7 +164,11 @@ watch(() => props.section, load, { immediate: true });
         <VCardTitle>{{ group.title }}</VCardTitle>
         <VCardText class="d-flex flex-column ga-3">
           <template v-for="field in group.fields" :key="field.key">
-            <VSelect v-if="field.options" :id="`global-${field.key}`" v-model="values[field.key]" :label="field.label" :items="field.options" :disabled="saving" />
+            <template v-if="field.secret">
+              <VTextField :id="`global-${field.key}`" v-model="values[field.key]" type="password" autocomplete="new-password" :label="field.label" :hint="storedSecrets[field.key] ? '已配置，留空保留原值' : '未配置，输入以设置新值'" persistent-hint :disabled="saving || clearSecrets[field.key]" />
+              <VCheckbox v-if="storedSecrets[field.key]" v-model="clearSecrets[field.key]" :label="`清除已保存的${field.label}`" :disabled="saving" hide-details />
+            </template>
+            <VSelect v-else-if="field.options" :id="`global-${field.key}`" v-model="values[field.key]" :label="field.label" :items="field.options" :disabled="saving" />
             <VTextarea v-else-if="field.type === 'textarea'" :id="`global-${field.key}`" v-model="values[field.key]" :label="field.label" :hint="field.hint" persistent-hint rows="4" :disabled="saving" />
             <VTextField v-else-if="field.type === 'number'" :id="`global-${field.key}`" v-model.number="values[field.key]" type="number" :min="field.min" :label="field.label" :hint="field.hint" persistent-hint :disabled="saving" />
             <VTextField v-else :id="`global-${field.key}`" v-model="values[field.key]" :type="field.type || 'text'" :autocomplete="field.type === 'password' ? 'new-password' : undefined" :label="field.label" :hint="field.hint" :persistent-hint="!!field.hint" :disabled="saving" />

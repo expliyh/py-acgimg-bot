@@ -7,7 +7,7 @@ const client = axios.create({
 });
 
 export type SystemConfigSection = 'storage' | 'cache' | 'access';
-export type SystemConfigValues = Record<string, string | number>;
+export type SystemConfigValues = Record<string, string | number | boolean>;
 
 export async function fetchSystemConfig(section: SystemConfigSection): Promise<SystemConfigValues> {
   return (await client.get<SystemConfigValues>(`/config/${section}`)).data;

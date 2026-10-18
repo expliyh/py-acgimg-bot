@@ -41,6 +41,34 @@ async def provider_slot(config):
         await limiter.release()
 
 
+def check_input_budget(messages, limit):
+    """Apply a conservative local estimate without a provider-specific tokenizer.
+
+    Count every UTF-8 byte of the full message JSON, including inline image data,
+    plus chat framing. This deliberately overestimates typical text tokenization;
+    provider token usage remains authoritative. Remote media and other modalities
+    cannot be estimated locally, so bounded requests must not send them unchecked.
+    """
+    if limit is None:
+        return
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if part.get("type") == "text":
+                    continue
+                if part.get("type") == "image_url":
+                    image = part.get("image_url")
+                    url = image.get("url", "") if isinstance(image, dict) else ""
+                    if url.startswith("data:image/") and ";base64," in url:
+                        continue
+                raise ValueError("设置输入上限时仅支持文本和内嵌图片，无法估算远程媒体或其他媒体的输入用量")
+    estimated = len(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    estimated += 16 * len(messages) + 3
+    if estimated > limit:
+        raise ValueError(f"请求输入估算为 {estimated} Token，超过模型输入上限 {limit}；未发送请求")
+
+
 async def complete(config, messages):
     if "text" not in config.output_types:
         raise ValueError("审核模型必须支持文本输出")
@@ -52,6 +80,7 @@ async def complete(config, messages):
                         "video_url": "video", "file": "file"}.get(part.get("type"))
             if modality is None or modality not in config.input_types:
                 raise ValueError("模型不支持请求中的输入类型")
+    check_input_budget(messages, config.max_input_tokens)
     payload = {"model": config.model, "messages": messages}
     if config.max_output_tokens is not None:
         payload["max_tokens"] = config.max_output_tokens

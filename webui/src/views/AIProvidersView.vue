@@ -138,7 +138,7 @@ function remove(provider: AIProvider) {
             <h3 class="text-subtitle-1">模型配置</h3>
             <VBtn variant="tonal" prepend-icon="mdi-plus" :disabled="busy || form.models.length >= 100" @click="form.models.push(newAIModel())">添加模型</VBtn>
           </div>
-          <p class="text-caption text-medium-emphasis">每个模型独立配置能力。Token 上限留空表示未设置；输入容量由提供商计量，输出上限随请求发送。类型用于功能筛选，当前审核服务使用文本输出。</p>
+          <p class="text-caption text-medium-emphasis">每个模型独立配置能力。Token 上限留空表示未设置；输入按完整消息 JSON 的 UTF-8 字节数（含内嵌图片）加消息开销保守估算，超限不发送，可能提前拒绝。设置输入上限时不支持远程媒体、音频、视频及文件；实际 Token 用量由提供商计量。输出上限随请求发送。类型用于功能筛选，当前审核服务使用文本输出。</p>
           <VAlert v-if="!form.models.length" type="info" variant="tonal" density="compact">尚未添加模型，可先保存提供商。</VAlert>
           <VSheet v-for="(model, index) in form.models" :key="index" border rounded class="pa-4">
             <div class="d-flex align-center justify-space-between mb-3">

@@ -253,3 +253,50 @@ async def test_requests_apply_output_limit_and_reject_incompatible_input_before_
         with pytest.raises(ValueError, match="文本输出"):
             await complete(replace(config, output_types=("image",)), [])
         assert len(seen) == 1
+
+
+async def test_input_budget_checks_full_messages_and_media_before_http():
+    from dataclasses import replace
+    from services.ai.schemas import AIRequestConfig
+
+    seen = []
+
+    async def respond(request):
+        seen.append(await request.json())
+        return web.json_response({"choices": [{"message": {"content": "ok"}}]})
+
+    app = web.Application()
+    app.router.add_post("/chat/completions", respond)
+    async with TestServer(app) as server:
+        config = AIRequestConfig(provider_id="input-budget", base_url=str(server.make_url("/")).rstrip("/"),
+                                 api_key=None, model="text", max_input_tokens=180)
+        short = [{"role": "user", "content": "test"}]
+        assert await complete(config, short) == ("ok", {})
+        assert seen[-1]["messages"] == short
+        for messages in (
+            [{"role": "user", "content": "a" * 200}],
+            [{"role": "user", "content": "中" * 60}],
+            [{"role": "system", "content": "policy " * 20}, *short],
+            [{"role": "user", "content": [{"type": "text", "text": "a" * 70},
+                                           {"type": "text", "text": "b" * 70}]}],
+            [{"role": "user", "content": ""}] * 4,
+            [{"role": "user", "content": [{"type": "image_url", "image_url": {
+                "url": "data:image/png;base64," + "AAAA" * 100}}]}],
+        ):
+            with pytest.raises(ValueError, match="超过模型输入上限"):
+                await complete(config, messages)
+        remote_image = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "https://example.test/a.png"}}]}]
+        with pytest.raises(ValueError, match="无法估算"):
+            await complete(config, remote_image)
+        audio = [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}}]}]
+        with pytest.raises(ValueError, match="无法估算"):
+            await complete(replace(config, input_types=("text", "audio")), audio)
+        assert len(seen) == 1
+        # Unbounded models preserve the existing request behavior.
+        await complete(replace(config, max_input_tokens=None), remote_image)
+        assert len(seen) == 2 and seen[-1]["messages"] == remote_image
+        # Bounded vision requests still work when their inline data fits the estimate.
+        inline = [{"role": "user", "content": [{"type": "text", "text": "caption"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}]
+        await complete(replace(config, max_input_tokens=1000), inline)
+        assert seen[-1]["messages"] == inline

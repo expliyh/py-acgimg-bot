@@ -225,6 +225,38 @@ async def test_provider_shapes_leave_no_running_event(
     assert await store.warnings(guard_group, 2) == []
 
 
+async def test_input_limit_failure_records_failed_audit_without_punishment(guard_group, guard_bot, guard_ai_job):
+    from services.ai import providers
+
+    job = await guard_ai_job()
+    requests = []
+
+    async def respond(request):
+        requests.append(await request.json())
+        return web.json_response({"choices": [{"message": {"content": json.dumps(
+            {"category": "spam", "confidence": 1, "reason": "spam"}
+        )}}]})
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", respond)
+    async with TestServer(app) as server:
+        await configure_ai(base_url=str(server.make_url("/v1")), text_model="test")
+        defaults = await store.ai_config()
+        provider = next(item for item in await providers.all_providers() if item.id == defaults.ai_text.provider_id)
+        payload = provider.model_dump(exclude={"id"})
+        payload["models"][0]["max_input_tokens"] = 10
+        await providers.save(providers.ProviderInput(**payload), provider.id)
+        assert await ai.process(guard_bot, job) == "failed"
+    assert requests == []
+    async with engine.new_session() as session:
+        event = await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai"))
+        assert event.status == "failed"
+    guard_bot.delete_message.assert_not_awaited()
+    guard_bot.ban_chat_member.assert_not_awaited()
+    guard_bot.restrict_chat_member.assert_not_awaited()
+    assert await store.warnings(guard_group, 2) == []
+
+
 @pytest.mark.parametrize(
     "failure",
     ["refusal", "invalid_json", "extra_action", "http_error", "oversized", "redirect"],
