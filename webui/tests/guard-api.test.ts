@@ -38,6 +38,19 @@ test('global username words use a shared endpoint separate from group additions'
   assert.deepEqual(JSON.parse(requests[2].data), { username_sensitive_words: ['local'] });
 });
 
+test('restoring default username words fetches a draft before the user saves it', async () => {
+  response = { sensitive_words: ['USDT', '上门'] };
+  const defaults = await guardApi.usernameDefaults();
+  assert.equal(defaults, response);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'get');
+  assert.equal(requests[0].url, '/guard-username/defaults');
+  await guardApi.saveUsernameConfig(defaults);
+  assert.equal(requests[1].method, 'put');
+  assert.equal(requests[1].url, '/guard-username');
+  assert.deepEqual(JSON.parse(requests[1].data), response);
+});
+
 test('policy saves only changed fields to the selected group', async () => {
   response = { flood_enabled: true, verification_enabled: false };
   assert.equal(await guardApi.savePolicy(group, { flood_enabled: true }), response);

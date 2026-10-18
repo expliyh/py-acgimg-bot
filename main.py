@@ -31,6 +31,7 @@ import uvicorn
 from configs import config, db_config_declare
 from registries.config_registry import init_database_config
 from services import pixiv, storage_service, schema_migrator
+from services.moderation import store as moderation_store
 from utils.logging_config import setup_logging
 from utils import frontend_launcher
 from utils.admin_static import AdminStaticFiles, redirect_to_admin
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
         # Tasks to run during application startup
         await engine.create_all()
         await schema_migrator.ensure_schema_migrations(engine.engine)
+        await moderation_store.ensure_username_config()
         await storage_service.ensure_storage_config_defaults()
         storage = await storage_service.use()
         if storage is None:

@@ -282,6 +282,8 @@ export const guardApi = {
   ai: async (): Promise<AIConfig> => (await client.get("/guard-ai")).data,
   usernameConfig: async (): Promise<UsernameReviewConfig> =>
     (await client.get("/guard-username")).data,
+  usernameDefaults: async (): Promise<UsernameReviewConfig> =>
+    (await client.get("/guard-username/defaults")).data,
   saveUsernameConfig: async (value: UsernameReviewConfig): Promise<UsernameReviewConfig> =>
     (await client.put("/guard-username", value)).data,
   saveAI: async (value: AIConfig): Promise<AIConfig> =>

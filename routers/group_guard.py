@@ -404,6 +404,11 @@ async def get_username_config():
     return await store.username_config()
 
 
+@username_router.get("/defaults", response_model=UsernameReviewConfig)
+async def get_username_defaults():
+    return store.default_username_config()
+
+
 @username_router.put("", response_model=UsernameReviewConfig)
 async def put_username_config(payload: UsernameReviewConfig):
     saved = await store.save_username_config(payload)

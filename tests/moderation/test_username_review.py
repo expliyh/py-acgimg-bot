@@ -37,6 +37,16 @@ def test_sensitive_username_is_rejected_case_insensitively():
     assert hit and hit["kind"] == "sensitive_word"
 
 
+@pytest.mark.parametrize("value", ["USDT", "usdt", "UsDt", "ＵｓＤｔ"])
+@pytest.mark.parametrize("field", ["username", "full_name"])
+@pytest.mark.parametrize("global_word", [False, True])
+def test_sensitive_words_ignore_case_for_both_sources_and_name_fields(value, field, global_word):
+    settings = policy(username_sensitive_words=[] if global_word else ["usdt"])
+    member = user(**{field: f"service_{value}"})
+    hit = inspect_user(member, settings, ["USDT"] if global_word else [])
+    assert hit and hit["kind"] == "sensitive_word"
+
+
 def test_emoji_and_decorative_symbols_can_be_blocked():
     assert inspect_user(user("nice😀"), policy(username_block_emoji=True))["kind"] == "emoji"
     assert inspect_user(user("꧁nice꧂"), policy(username_block_abnormal_chars=True))["kind"] == "abnormal_chars"

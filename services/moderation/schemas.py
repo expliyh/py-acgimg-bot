@@ -15,6 +15,11 @@ from pydantic import (
 
 VERIFICATION_MESSAGE_MAX_LENGTH = 2000
 ACTION_REASON_MAX_LENGTH = 1000
+DEFAULT_USERNAME_SENSITIVE_WORDS = (
+    "加微", "加V", "加QQ", "USDT", "看主页", "上门",
+    "博彩", "网赌", "注册", "兼职", "约炮", "裸聊",
+    "办证", "代开发票", "刷单返利",
+)
 
 
 def validate_record_name(value: str, label: str = "名称") -> str:

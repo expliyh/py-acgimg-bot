@@ -643,6 +643,12 @@ async function saveUsernameConfig() {
     globalUsernameWords.value = config.sensitive_words.join("\n");
   }, "全局用户名敏感词已保存，对所有启用用户名审核的群生效");
 }
+async function restoreUsernameDefaults() {
+  await run(async () => {
+    const config = await guardApi.usernameDefaults();
+    globalUsernameWords.value = config.sensitive_words.join("\n");
+  }, "已填入默认敏感词，点击保存后生效");
+}
 watch(reviewPage, (p) => {
   if (policy.value)
     void run(async () => {
@@ -854,6 +860,8 @@ watch(
             auto-grow
           />
           <VBtn :loading="busy" @click="saveUsernameConfig">保存全局敏感词</VBtn>
+          <VBtn class="ml-3" variant="outlined" :disabled="busy" @click="restoreUsernameDefaults">恢复默认</VBtn>
+          <p class="text-caption mt-3">恢复默认会填入默认词，点击“保存全局敏感词”后生效。清空并保存可停用全局词库。</p>
         </VCardText>
       </VCard>
       <VCard v-if="tab === 'rules'"

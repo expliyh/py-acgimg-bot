@@ -25,6 +25,7 @@ async def api(guard_group, guard_bot, monkeypatch):
     async with engine.new_session() as session:
         session.add(Group(id=guard_group + 1))
         await session.commit()
+    await store.ensure_username_config()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
@@ -33,7 +34,7 @@ async def api(guard_group, guard_bot, monkeypatch):
 
 async def test_global_username_words_are_shared_and_group_additions_stay_isolated(api, guard_group):
     endpoint = "/api/guard-username"
-    assert (await api.get(endpoint)).json() == {"sensitive_words": []}
+    assert (await api.get(endpoint)).json()["sensitive_words"]
     words = {"sensitive_words": [" ScAm ", "ＳＣＡＭ", "", "广告"]}
     saved = await api.put(endpoint, json=words)
     assert saved.status_code == 200
@@ -67,6 +68,60 @@ async def test_global_username_words_are_shared_and_group_additions_stay_isolate
         ))).all()
         assert len(events) == 2
         assert all(event.source == "web:deployment-admin" for event in events)
+
+
+async def test_default_username_words_cover_ads_in_multiple_groups_and_preserve_overrides(api, guard_group):
+    endpoint = "/api/guard-username"
+    defaults = (await api.get(endpoint)).json()["sensitive_words"]
+    assert 0 < len(defaults) <= 15
+    for group_id in (guard_group, guard_group + 1):
+        await store.save_policy(group_id, {"username_review_enabled": True})
+        settings = await store.policy(group_id)
+        for name in ("客服加微咨询", "客服加ｖ咨询", "联系加qq", "usdt兑换", "福利看主页",
+                     "上门服务", "博彩平台", "网赌代理", "开户注册", "网络兼职",
+                     "同城约炮", "美女裸聊", "专业办证", "代开发票咨询", "刷单返利客服"):
+            hit = await username_review.inspect_with_ai(SimpleNamespace(full_name=name), settings)
+            assert hit and hit["kind"] == "sensitive_word", name
+        for value in ("USDT", "usdt", "UsDt", "ＵｓＤｔ"):
+            for field in ("username", "full_name"):
+                hit = await username_review.inspect_with_ai(SimpleNamespace(**{field: value}), settings)
+                assert hit and hit["kind"] == "sensitive_word", (field, value)
+        for name in ("小明", "程序员阿伟", "Violet", "学校简介", "normal_user"):
+            assert await username_review.inspect_with_ai(SimpleNamespace(full_name=name), settings) is None
+    # A custom list replaces the defaults; an intentional empty list stays empty.
+    for words in (["自定义词"], []):
+        response = await api.put(endpoint, json={"sensitive_words": words})
+        assert response.status_code == 200
+        assert (await api.get(endpoint)).json() == {"sensitive_words": words}
+        for group_id in (guard_group, guard_group + 1):
+            settings = await store.policy(group_id)
+            assert await username_review.inspect_with_ai(SimpleNamespace(full_name="博彩平台"), settings) is None
+            hit = await username_review.inspect_with_ai(SimpleNamespace(full_name="自定义词"), settings)
+            assert bool(hit) == bool(words)
+
+
+async def test_restore_username_defaults_is_a_draft_until_saved_and_keeps_group_additions(api, guard_group):
+    endpoint = "/api/guard-username"
+    await api.put(endpoint, json={"sensitive_words": ["customword"]})
+    for group_id in (guard_group, guard_group + 1):
+        await store.save_policy(group_id, {
+            "username_review_enabled": True, "username_sensitive_words": ["localword"],
+        })
+    response = await api.get(endpoint + "/defaults")
+    assert response.status_code == 200
+    defaults = response.json()
+    assert "USDT" in defaults["sensitive_words"]
+    assert 0 < len(defaults["sensitive_words"]) <= 15
+    assert (await api.get(endpoint)).json() == {"sensitive_words": ["customword"]}
+    assert (await api.put(endpoint, json=defaults)).status_code == 200
+    await store.ensure_username_config()
+    assert (await api.get(endpoint)).json() == defaults
+    for group_id in (guard_group, guard_group + 1):
+        settings = await store.policy(group_id)
+        assert settings.username_sensitive_words == ["localword"]
+        for name in ("uSdT", "localword"):
+            assert await username_review.inspect_with_ai(SimpleNamespace(username=name), settings)
+        assert await username_review.inspect_with_ai(SimpleNamespace(username="customword"), settings) is None
 
 
 @pytest.mark.parametrize("payload", [
