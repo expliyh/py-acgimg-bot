@@ -6,6 +6,17 @@ const client = axios.create({
   timeout: 15000
 });
 
+export type SystemConfigSection = 'storage' | 'cache' | 'access';
+export type SystemConfigValues = Record<string, string | number | boolean>;
+
+export async function fetchSystemConfig(section: SystemConfigSection): Promise<SystemConfigValues> {
+  return (await client.get<SystemConfigValues>(`/config/${section}`)).data;
+}
+
+export async function saveSystemConfig(section: SystemConfigSection, values: SystemConfigValues): Promise<SystemConfigValues> {
+  return (await client.put<SystemConfigValues>(`/config/${section}`, values)).data;
+}
+
 export interface DashboardActivityEntry {
   message_id: number;
   scope: string;

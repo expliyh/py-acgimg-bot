@@ -147,8 +147,8 @@ async def inspect_with_ai(user, policy):
         return local
     if not getattr(policy, "username_ai_check", False):
         return None
-    config = await store.ai_config()
-    if not config.base_url or not config.text_model:
+    config = await store.resolve_ai(policy, "ai_username")
+    if config is None:
         return None
     username = (getattr(user, "username", None) or "").strip()
     display_name = (getattr(user, "full_name", None) or "").strip()

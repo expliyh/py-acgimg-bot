@@ -29,6 +29,15 @@ test('policy snapshots do not share mutable arrays', () => {
   assert.deepEqual(snapshot.domain_allowlist, ['example.com']);
 });
 
+test('nested AI selections are isolated and compared by value', () => {
+  const policy = { ai_text: { provider_id: 'provider', model: 'text' }, ai_vision: null };
+  const snapshot = cloneGuardPolicy(policy);
+  assert.deepEqual(changedGuardPolicy(policy, snapshot), {});
+  policy.ai_text.model = 'different';
+  assert.equal(snapshot.ai_text.model, 'text');
+  assert.deepEqual(changedGuardPolicy(policy, snapshot), { ai_text: { provider_id: 'provider', model: 'different' } });
+});
+
 test('guard view patches the diff against its loaded snapshot', () => {
   const source = readFileSync(
     new URL('../src/views/GuardView.vue', import.meta.url),

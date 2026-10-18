@@ -11,6 +11,7 @@ GitHub Actions 的 service 测试任务包含 `tests/moderation/`，其执行结
 | `tests/test_moderation.py` | 旧配置兼容、规则与命令拦截、媒体组去重、警告升级、验证竞争、SQLite 迁移、防突袭、AI 分数和图片分级 |
 | `tests/moderation/test_ai.py` | 图片下载与缩放、大小限制、模型拒答/异常/重定向、文本截断、用量记录、执行前权限与策略复查、复核与处罚幂等、失败计入预算、图片附件与已知分级 |
 | `tests/moderation/test_tasks.py` | 重启后过期验证、旧验证/解禁任务失效、公告五分钟边界、夏令时与错过周期、公告修改、发送结果不确定、AI 并发与停止、日志保留 |
+| `tests/system/test_ai_providers.py` | 多提供商与模型、密钥不回显、群组覆盖与继承、引用保护、旧配置迁移、提供商独立并发 |
 | `tests/moderation/test_telegram.py` | 管理员/群主/匿名消息/成员豁免、分项机器人权限、回复和 ID 处罚、时长、回调群归属与权限撤销、他人点击验证、解除失败、举报限流、并发复核、编辑后复核、清理部分失败 |
 | `tests/moderation/test_api.py` | Telegram 配置缓存失效、部分更新校验、操作幂等、未连接与失败结果、群间隔离、分页与统计、公告 UTC、密钥保留和清空、webhook secret |
 | `tests/moderation/test_review_regressions.py` | 入群事件顺序与重复事件、后续权限变更、AI 按启用类别筛选内容、遗留任务不扣预算、无事件群的临时记录与任务清理、举报后的消息版本复查 |

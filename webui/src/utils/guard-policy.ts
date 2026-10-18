@@ -1,13 +1,20 @@
 function cloneField<T>(value: T): T {
-  return (Array.isArray(value) ? [...value] : value) as T;
+  if (Array.isArray(value)) return value.map(cloneField) as T;
+  if (value !== null && typeof value === 'object') return cloneGuardPolicy(value) as T;
+  return value;
 }
 
 function fieldsEqual(left: unknown, right: unknown): boolean {
   if (Array.isArray(left) && Array.isArray(right)) {
     return (
       left.length === right.length &&
-      left.every((value, index) => Object.is(value, right[index]))
+      left.every((value, index) => fieldsEqual(value, right[index]))
     );
+  }
+  if (left !== null && right !== null && typeof left === 'object' && typeof right === 'object') {
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length && keys.every((key) =>
+      Object.prototype.hasOwnProperty.call(right, key) && fieldsEqual((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
   }
   return Object.is(left, right);
 }

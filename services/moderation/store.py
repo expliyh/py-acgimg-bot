@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from models import GroupGuardPendingVerification as Pending
 from models import GroupGuardSettings, GuardEvent, GuardRecord, GuardTask
 from registries import engine
+from services.ai import providers
 from services import group_guard
 
 from .schemas import (
@@ -123,9 +124,13 @@ async def policy(group_id: int) -> Policy:
 
 
 async def save_policy(group_id: int, changes: dict) -> Policy:
-    async with lock(group_id):
+    async with lock(group_id), providers.configuration_lock():
         previous = await policy(group_id)
         value = Policy.model_validate(previous.model_dump() | changes)
+        catalogue = await providers.all_providers()
+        for key in providers.SELECTION_FIELDS:
+            if key in changes:
+                await providers.validate_selection(getattr(value, key), catalogue, feature=key)
         async with engine.new_session() as session:
             row = await session.get(GroupGuardSettings, group_id)
             if row is None:
@@ -464,15 +469,18 @@ async def ai_config() -> AIConfig:
 
 
 async def save_ai_config(config: AIConfig) -> dict:
-    previous = await ai_config()
-    data = config.model_dump()
-    if data["api_key"] is None:
-        data["api_key"] = previous.api_key
-    await put_record(0, "ai_config", "default", data)
-    return public_ai_config(AIConfig.model_validate(data))
+    async with providers.configuration_lock():
+        catalogue = await providers.all_providers()
+        for key in providers.SELECTION_FIELDS:
+            await providers.validate_selection(getattr(config, key), catalogue, feature=key)
+        await put_record(0, "ai_config", "default", config.model_dump())
+    return config.model_dump()
 
 
-def public_ai_config(config: AIConfig) -> dict:
-    return config.model_dump(exclude={"api_key"}) | {
-        "has_api_key": bool(config.api_key)
-    }
+async def ai_selection(settings, key, *, defaults=None):
+    selection = getattr(settings, key, None)
+    return selection if selection else getattr(defaults if defaults is not None else await ai_config(), key)
+
+
+async def resolve_ai(settings, key, *, defaults=None, catalogue=None):
+    return await providers.resolve(await ai_selection(settings, key, defaults=defaults), catalogue)

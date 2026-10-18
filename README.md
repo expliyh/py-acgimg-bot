@@ -56,6 +56,12 @@ WebAdmin 前端要求 Node.js `>=22.12.0`（Docker 构建阶段使用 Node 24）
 
 后端已实现仪表盘、群组管理、私聊管理以及全局功能开关等 RESTful API，前端控制台通过这些接口实现实时管理能力，并预留了未来功能扩展位置。
 
+管理端「全局配置」（`/global-config`）集中提供功能开关、Telegram Bot Token、Pixiv Token、AI 提供商、审核默认模型、全局用户名词库、图片存储、Telegram 缓存与超级管理员设置。AI 提供商支持多个服务和多个模型，统一管理地址、密钥、超时与并发；文本、图片和用户名审核分别选择提供商和模型，群组功能页面可覆盖全局默认。存储支持本地、Backblaze B2、WebDAV 和禁用，保存后在下次文件操作时读取新配置；缓存保存后自动重置。超级管理员列表留空会允许所有用户使用机器人管理命令。
+
+存储的 Backblaze Application Key 和 WebDAV 密码只写不回显，接口仅返回 `has_backblaze_app_key`、`has_webdav_password` 状态。保存时省略、传 `null` 或留空均保留原值；填写新值可替换，勾选清除可显式移除（API 使用 `clear_backblaze_app_key`、`clear_webdav_password`）。启用 Backblaze 时不能清除其必需密钥。
+
+存储、缓存与超级管理员分别使用 `GET/PUT /api/config/storage`、`GET/PUT /api/config/cache`、`GET/PUT /api/config/access`，与机器人管理面板共用数据库配置。数据库连接、Webhook 和日志等启动参数仍由部署环境变量配置。
+
 管理端「图片推送」支持指定群、多个群和动态所有群的手动/自动图片推送，并提供固定相同、固定不同、随机相同、随机不同四种分配方式。详细规则和 Telegram 命令见 [主动图片推送](docs/image-push.md)。
 
 管理端「图片图库」用于浏览、编辑、批量维护和刷新已添加的 Pixiv/手动图片；媒体读取、删除清理和存储安全边界见 [图片图库管理](docs/illustration-gallery.md)。

@@ -380,7 +380,15 @@ async def _add_image_push_tables(conn: AsyncConnection) -> None:
     )
 
 
+async def _expand_config_values(conn: AsyncConnection) -> None:
+    # SQLite does not enforce VARCHAR lengths; MySQL needs an explicit upgrade.
+    if conn.dialect.name != "sqlite":
+        table = _quote(f"{file_config.db_prefix}configs")
+        await conn.execute(text(f"ALTER TABLE {table} MODIFY COLUMN `value_str` TEXT NULL"))
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
+    Migration(9, "Allow full configuration URLs and administrator lists", _expand_config_values),
     Migration(8, "Add durable image push plans and delivery receipts", _add_image_push_tables),
     Migration(7, "Add Telegram username lookup", _add_user_username),
     Migration(

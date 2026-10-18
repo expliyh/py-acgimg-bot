@@ -17,7 +17,6 @@ import {
   type GuardPage,
   type GuardEvent,
   type GuardStats,
-  type AIConfig,
   type GuardTask,
   type ReviewDecision,
   type GroupMemberListItem,
@@ -30,6 +29,7 @@ import {
 import { shouldRetainActionRequest } from "@/utils/guard-action";
 import { createRequestId } from "@/utils/request-id";
 import { useFeedback } from "@/composables/feedback";
+import AIModelSelect from "@/components/AIModelSelect.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -132,15 +132,6 @@ const contentForm = reactive<GuardContent>({
   timezone: "Asia/Shanghai",
 });
 const dueAt = ref("");
-const globalUsernameWords = ref("");
-const aiConfig = ref<AIConfig>({
-    base_url: "",
-    text_model: "",
-    vision_model: "",
-    timeout: 20,
-    concurrency: 2,
-  }),
-  apiKey = ref("");
 const categories: Record<
   GuardCategory,
   { title: string; fields: (keyof GuardPolicy)[] }
@@ -252,6 +243,9 @@ const labels: Record<keyof GuardPolicy, string> = {
   ai_spam: "广告诈骗与引流审核",
   ai_abuse: "辱骂与仇恨审核",
   ai_images: "色情与暴力图片审核",
+  ai_text: "文本审核模型",
+  ai_vision: "图片审核模型",
+  ai_username: "用户名审核模型",
   ai_auto_threshold: "自动处罚模型评分阈值",
   ai_review_threshold: "人工复核模型评分阈值",
   ai_daily_limit: "每日 AI 调用上限",
@@ -364,9 +358,7 @@ async function load() {
       guardApi.reviews(id, 1),
       guardApi.logs(id, 1),
       guardApi.stats(id),
-      guardApi.ai(),
       guardApi.tasks(id),
-      guardApi.usernameConfig(),
     ]);
     if (version !== loadVersion) return;
     groupId.value = id;
@@ -377,11 +369,9 @@ async function load() {
       reviews.value,
       logs.value,
       stats.value,
-      aiConfig.value,
       tasks.value,
     ] = values;
     policySnapshot.value = cloneGuardPolicy(policy.value!);
-    globalUsernameWords.value = values[8].sensitive_words.join("\n");
     // New scheduled announcements should follow the group's configured zone.
     contentForm.timezone = policy.value!.timezone;
     rules.value = values[1].items;
@@ -649,39 +639,6 @@ async function decide(row: GuardRecord<GuardReview>, decision: ReviewDecision) {
       throw new Error(`复核处理失败：${JSON.stringify(result.data.results)}`);
   }, "复核已处理");
 }
-async function saveAI() {
-  await run(async () => {
-    const { has_api_key, ...value } = aiConfig.value;
-    aiConfig.value = await guardApi.saveAI({
-      ...value,
-      api_key: apiKey.value || null,
-    });
-    apiKey.value = "";
-  });
-}
-async function clearAIKey() {
-  await run(async () => {
-    const { has_api_key, ...value } = aiConfig.value;
-    aiConfig.value = await guardApi.saveAI({ ...value, api_key: "" });
-  }, "密钥已清除");
-}
-async function saveUsernameConfig() {
-  await run(async () => {
-    const config = await guardApi.saveUsernameConfig({
-      sensitive_words: globalUsernameWords.value
-        .split(/[,，\n]+/)
-        .map((word) => word.trim())
-        .filter(Boolean),
-    });
-    globalUsernameWords.value = config.sensitive_words.join("\n");
-  }, "全局用户名敏感词已保存，对所有启用用户名审核的群生效");
-}
-async function restoreUsernameDefaults() {
-  await run(async () => {
-    const config = await guardApi.usernameDefaults();
-    globalUsernameWords.value = config.sensitive_words.join("\n");
-  }, "已填入默认敏感词，点击保存后生效");
-}
 watch(reviewPage, (p) => {
   if (policy.value)
     void run(async () => {
@@ -872,6 +829,11 @@ watch(
               />
             </VCol>
           </VRow>
+          <template v-if="tab === 'ai'">
+            <AIModelSelect v-model="policy.ai_text" label="文本审核" inherit :disabled="busy" class="mb-4" />
+            <AIModelSelect v-model="policy.ai_vision" label="图片审核" :input-types="['text', 'image']" inherit :disabled="busy" class="mb-4" />
+          </template>
+          <AIModelSelect v-if="tab === 'join'" v-model="policy.ai_username" label="用户名审核" inherit :disabled="busy" class="mb-4" />
           <p v-if="tab === 'content' || tab === 'join'" class="text-caption">
             入群审核会在 Join Request 批准前和直接入群事件发生时执行；用户名和显示名均检查全局词库与本群追加词，不区分大小写。本群留空仍继承全局词库。
           </p>
@@ -880,23 +842,10 @@ watch(
           ></VCardText
         ></VCard
       >
-      <VCard v-if="tab === 'join'">
-        <VCardTitle>全局用户名敏感词</VCardTitle>
-        <VCardText>
-          <p class="text-body-2 mb-4">
-            所有启用用户名审核的群共用此词库，并叠加各群追加词。修改后下次审核即生效；每份词库最多 200 个词，每词最多 100 个字符。
-          </p>
-          <VTextarea
-            v-model="globalUsernameWords"
-            label="全局敏感词（每行一个，或用逗号分隔）"
-            rows="4"
-            auto-grow
-          />
-          <VBtn :loading="busy" @click="saveUsernameConfig">保存全局敏感词</VBtn>
-          <VBtn class="ml-3" variant="outlined" :disabled="busy" @click="restoreUsernameDefaults">恢复默认</VBtn>
-          <p class="text-caption mt-3">恢复默认会填入默认词，点击“保存全局敏感词”后生效。清空并保存可停用全局词库。</p>
-        </VCardText>
-      </VCard>
+      <VAlert v-if="tab === 'join'" type="info" variant="tonal">
+        全局用户名敏感词已集中到全局配置，本群追加词仍在上方设置。
+        <VBtn class="ml-2" size="small" variant="text" :to="{ name: 'global-moderation' }">打开全局配置</VBtn>
+      </VAlert>
       <VCard v-if="tab === 'rules'"
         ><VCardTitle>审核规则</VCardTitle
         ><VCardText class="d-flex flex-column ga-3">
@@ -990,52 +939,10 @@ watch(
           </div>
         </VCardText></VCard
       >
-      <VCard v-if="tab === 'ai'"
-        ><VCardTitle>模型服务（所有群共用）</VCardTitle
-        ><VCardText class="d-flex flex-column ga-3">
-          <VAlert type="info" variant="tonal"
-            >未配置或模型异常时，仅运行规则审核。模型评分不是准确率。图片遵循群现有分级，无法判断时进入复核。</VAlert
-          >
-          <VTextField
-            v-model="aiConfig.base_url"
-            label="兼容 API 地址（通常以 /v1 结尾）"
-          /><VTextField
-            v-model="apiKey"
-            type="password"
-            autocomplete="new-password"
-            label="API 密钥"
-            :hint="aiConfig.has_api_key ? '已配置，留空保留原密钥' : '尚未配置'"
-            persistent-hint
-          />
-          <VRow
-            ><VCol cols="12" md="6"
-              ><VTextField
-                v-model="aiConfig.text_model"
-                label="文本模型" /></VCol
-            ><VCol cols="12" md="6"
-              ><VTextField
-                v-model="aiConfig.vision_model"
-                label="视觉模型" /></VCol
-            ><VCol cols="12" md="6"
-              ><VTextField
-                v-model.number="aiConfig.timeout"
-                type="number"
-                label="请求超时（秒）" /></VCol
-            ><VCol cols="12" md="6"
-              ><VTextField
-                v-model.number="aiConfig.concurrency"
-                type="number"
-                label="全局并发" /></VCol
-          ></VRow>
-          <VBtn :loading="busy" @click="saveAI">保存模型服务</VBtn
-          ><VBtn
-            variant="text"
-            :disabled="busy"
-            @click="clearAIKey"
-            >清除密钥</VBtn
-          >
-        </VCardText></VCard
-      >
+      <VAlert v-if="tab === 'ai'" type="info" variant="tonal">
+        本群可分别选择文本与图片审核模型，留空继承全局默认。提供商地址、密钥和请求限制在全局配置中统一管理。
+        <VBtn class="ml-2" size="small" variant="text" :to="{ name: 'global-moderation' }">打开全局配置</VBtn>
+      </VAlert>
       <VCard v-if="tab === 'members'"
         ><VCardTitle>消息级高级操作</VCardTitle
         ><VCardText class="d-flex flex-column ga-3">

@@ -38,19 +38,57 @@ const router = createRouter({
       component: () => import('@/views/CommandHistoryView.vue')
     },
     {
-      path: '/features',
-      name: 'features',
-      component: () => import('@/views/FeatureConfigView.vue')
-    },
-    {
-      path: '/bot-tokens',
-      name: 'bot-tokens',
-      component: () => import('@/views/BotTokensView.vue')
-    },
-    {
-      path: '/pixiv-tokens',
-      name: 'pixiv-tokens',
-      component: () => import('@/views/PixivTokensView.vue')
+      path: '/global-config',
+      component: () => import('@/views/GlobalConfigView.vue'),
+      children: [
+        {
+          path: '',
+          redirect: { name: 'features' }
+        },
+        {
+          path: 'features',
+          name: 'features',
+          component: () => import('@/views/FeatureConfigView.vue')
+        },
+        {
+          path: 'bot-tokens',
+          name: 'bot-tokens',
+          component: () => import('@/views/BotTokensView.vue')
+        },
+        {
+          path: 'pixiv-tokens',
+          name: 'pixiv-tokens',
+          component: () => import('@/views/PixivTokensView.vue')
+        },
+        {
+          path: 'ai-providers',
+          name: 'global-ai-providers',
+          component: () => import('@/views/AIProvidersView.vue')
+        },
+        {
+          path: 'moderation',
+          name: 'global-moderation',
+          component: () => import('@/views/GlobalModerationConfigView.vue')
+        },
+        {
+          path: 'storage',
+          name: 'global-storage',
+          component: () => import('@/views/GlobalSystemConfigView.vue'),
+          props: { section: 'storage' }
+        },
+        {
+          path: 'cache',
+          name: 'global-cache',
+          component: () => import('@/views/GlobalSystemConfigView.vue'),
+          props: { section: 'cache' }
+        },
+        {
+          path: 'access',
+          name: 'global-access',
+          component: () => import('@/views/GlobalSystemConfigView.vue'),
+          props: { section: 'access' }
+        }
+      ]
     },
     {
       path: '/illustrations',

@@ -26,6 +26,11 @@ class Storage(ABC):
             return
         await self.get_config()
 
+    async def invalidate_config(self) -> None:
+        """Reload settings on the next operation after an admin update."""
+        async with self._config_lock:
+            self._configured = False
+
     @abstractmethod
     async def _load_config(self) -> None:
         """Fetch provider-specific configuration data."""

@@ -1,10 +1,13 @@
 """Image boundaries and untrusted classifier output, without external requests."""
 
+from ai_helpers import configure_ai, request_config
+
 import asyncio
 import base64
 import io
 import json
 import warnings
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,10 +15,11 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select
+from telegram import Update
 
-from models import Group, GuardEvent
+from models import Group, GuardEvent, GuardTask
 from registries import engine
-from services.moderation import ai, store, worker
+from services.moderation import ai, runtime, store, worker
 from services.moderation.schemas import AIConfig, AIVerdict, Policy
 
 
@@ -29,6 +33,40 @@ def photo(file_size=100):
             "file_size": file_size,
         }
     ]
+
+
+@pytest.mark.parametrize("image,failure,expected", [
+    (False, False, "text"), (True, False, "vision"), (True, True, "text"),
+])
+async def test_audits_resolve_their_own_provider_and_model(
+    guard_bot, guard_ai_job, monkeypatch, image, failure, expected,
+):
+    from services.ai import providers
+    from services.ai.schemas import ProviderInput
+
+    text_provider = await providers.save(ProviderInput(
+        name="Text", base_url="http://127.0.0.1:8/v1", models=[{"id": "text"}], api_key="text-key",
+    ))
+    vision_provider = await providers.save(ProviderInput(
+        name="Vision", base_url="http://127.0.0.1:7/v1", models=[{"id": "vision", "input_types": ["text", "image"]}], api_key="vision-key",
+    ))
+    overrides = {
+        "ai_text": {"provider_id": text_provider.id, "model": "text"},
+        "ai_vision": {"provider_id": vision_provider.id, "model": "vision"},
+        "ai_images": image,
+    }
+    job = await guard_ai_job(policy=overrides, **({"photo": photo()} if image else {}))
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=None))
+    monkeypatch.setattr(ai, "image_data", AsyncMock(
+        side_effect=ValueError("download failed") if failure else None,
+        return_value="data:image/jpeg;base64,dGVzdA==",
+    ))
+    classifier = AsyncMock(return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {}))
+    monkeypatch.setattr(ai, "classify", classifier)
+    assert await ai.process(guard_bot, job) == "allow"
+    resolved = classifier.await_args.args[0]
+    assert resolved.model == expected and resolved.api_key == f"{expected}-key"
+    assert resolved.provider_id == (text_provider.id if expected == "text" else vision_provider.id)
 
 
 async def test_downloaded_image_is_resized_and_encoded_locally(
@@ -74,9 +112,7 @@ async def test_username_and_content_requests_share_provider_concurrency():
     app = web.Application()
     app.router.add_post("/chat/completions", respond)
     async with TestServer(app) as server:
-        config = AIConfig(
-            base_url=str(server.make_url("/")), text_model="text", concurrency=1
-        )
+        config = request_config(base_url=str(server.make_url("/")), concurrency=1, model="text")
         content = asyncio.create_task(
             ai.classify(config, Policy(ai_spam=True), "ordinary")
         )
@@ -177,9 +213,7 @@ async def test_provider_shapes_leave_no_running_event(
     app = web.Application()
     app.router.add_post("/v1/chat/completions", respond)
     async with TestServer(app) as server:
-        await store.save_ai_config(AIConfig(
-            base_url=str(server.make_url("/v1")), text_model="test"
-        ))
+        await configure_ai(base_url=str(server.make_url("/v1")), text_model="test")
         assert await ai.process(guard_bot, job) == (
             "allow" if shape == "null_usage" else "failed"
         )
@@ -188,6 +222,38 @@ async def test_provider_shapes_leave_no_running_event(
         event = await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai"))
         assert event.status == ("success" if shape == "null_usage" else "failed")
     guard_bot.delete_message.assert_not_awaited()
+    assert await store.warnings(guard_group, 2) == []
+
+
+async def test_input_limit_failure_records_failed_audit_without_punishment(guard_group, guard_bot, guard_ai_job):
+    from services.ai import providers
+
+    job = await guard_ai_job()
+    requests = []
+
+    async def respond(request):
+        requests.append(await request.json())
+        return web.json_response({"choices": [{"message": {"content": json.dumps(
+            {"category": "spam", "confidence": 1, "reason": "spam"}
+        )}}]})
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", respond)
+    async with TestServer(app) as server:
+        await configure_ai(base_url=str(server.make_url("/v1")), text_model="test")
+        defaults = await store.ai_config()
+        provider = next(item for item in await providers.all_providers() if item.id == defaults.ai_text.provider_id)
+        payload = provider.model_dump(exclude={"id"})
+        payload["models"][0]["max_input_tokens"] = 10
+        await providers.save(providers.ProviderInput(**payload), provider.id)
+        assert await ai.process(guard_bot, job) == "failed"
+    assert requests == []
+    async with engine.new_session() as session:
+        event = await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai"))
+        assert event.status == "failed"
+    guard_bot.delete_message.assert_not_awaited()
+    guard_bot.ban_chat_member.assert_not_awaited()
+    guard_bot.restrict_chat_member.assert_not_awaited()
     assert await store.warnings(guard_group, 2) == []
 
 
@@ -225,11 +291,7 @@ async def test_classifier_rejects_provider_failures(failure):
     async with TestServer(app) as server:
         with pytest.raises(ValueError):
             await ai.classify(
-                AIConfig(
-                    base_url=str(server.make_url("/v1")),
-                    api_key="fake-test-key",
-                    text_model="test",
-                ),
+                request_config(base_url=str(server.make_url("/v1")), api_key="fake-test-key", model="test"),
                 Policy(ai_spam=True),
                 "spam",
             )
@@ -265,11 +327,7 @@ async def test_text_request_truncates_evidence_and_filters_usage():
     app.router.add_post("/chat/completions", respond)
     async with TestServer(app) as server:
         verdict, usage = await ai.classify(
-            AIConfig(
-                base_url=str(server.make_url("/")),
-                text_model="text-only",
-                vision_model="vision",
-            ),
+            request_config(base_url=str(server.make_url("/")), model="text-only"),
             Policy(ai_spam=True),
             "x" * 20000,
         )
@@ -311,7 +369,7 @@ async def test_classifier_reads_fragmented_response_to_eof():
     app.router.add_post("/chat/completions", respond)
     async with TestServer(app) as server:
         verdict, usage = await ai.classify(
-            AIConfig(base_url=str(server.make_url("/")), text_model="text-only"),
+            request_config(base_url=str(server.make_url("/")), model="text-only"),
             Policy(ai_spam=True),
             "ordinary",
         )
@@ -413,6 +471,54 @@ async def test_failed_call_consumes_budget_but_never_warns(
         assert event.data == {"error": "TimeoutError"}
 
 
+@pytest.mark.parametrize("enabled", ["ai_text", "ai_vision"])
+async def test_missing_message_model_skips_queue_and_budget(
+    guard_group, guard_bot, guard_ai_job, guard_message, monkeypatch, enabled,
+):
+    policy = {"ai_spam": True, "ai_images": True, "ai_daily_limit": 1}
+    image = {"text": None, "photo": photo()}
+    skipped_values = {} if enabled == "ai_vision" else image
+    enabled_values = image if enabled == "ai_vision" else {}
+    skipped = await guard_ai_job(policy=policy, **skipped_values)
+    accepted = await guard_ai_job(policy=policy, message_id=11, **enabled_values)
+    defaults = await store.ai_config()
+    await store.save_ai_config(AIConfig(**{enabled: getattr(defaults, enabled)}))
+    classifier = AsyncMock(return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {}))
+    monkeypatch.setattr(ai, "classify", classifier)
+    monkeypatch.setattr(ai, "image_data", AsyncMock(return_value="data:image/jpeg;base64,dGVzdA=="))
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=None))
+
+    await runtime.preprocess(Update(1, message=guard_message(**skipped_values)), SimpleNamespace(bot=guard_bot))
+    async with engine.new_session() as session:
+        assert await session.scalar(select(GuardTask).where(GuardTask.kind == "ai")) is None
+    assert await ai.process(guard_bot, skipped) == "skipped"
+    async with engine.new_session() as session:
+        assert await session.scalar(select(GuardEvent).where(GuardEvent.action == "ai")) is None
+    assert await ai.process(guard_bot, accepted) == "allow"
+    classifier.assert_awaited_once()
+    async with engine.new_session() as session:
+        events = (await session.scalars(select(GuardEvent).where(GuardEvent.action == "ai"))).all()
+        assert len(events) == 1 and events[0].status == "success"
+
+
+async def test_missing_vision_model_checks_caption_with_text_provider(
+    guard_bot, guard_ai_job, monkeypatch,
+):
+    job = await guard_ai_job(policy={"ai_images": True}, text=None, caption="ordinary caption", photo=photo())
+    defaults = await store.ai_config()
+    await store.save_ai_config(AIConfig(ai_text=defaults.ai_text))
+    downloader = AsyncMock()
+    classifier = AsyncMock(return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {}))
+    monkeypatch.setattr(ai, "image_data", downloader)
+    monkeypatch.setattr(ai, "classify", classifier)
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=None))
+    assert await ai.process(guard_bot, job) == "allow"
+    downloader.assert_not_awaited()
+    config, settings, text, image, _ = classifier.await_args.args
+    assert config.model == defaults.ai_text.model
+    assert text == "ordinary caption" and image is None and not settings.ai_images
+
+
 async def test_image_document_uses_caption_and_known_permitted_grade(
     guard_bot, guard_ai_job, monkeypatch
 ):
@@ -472,7 +578,8 @@ async def test_known_grade_does_not_require_download_or_models(
         text=None,
         document={"file_id": "known", "file_unique_id": "known", "mime_type": "image/png"},
     )
-    await store.save_ai_config(AIConfig(base_url="http://127.0.0.1:9/v1"))
+    await configure_ai(base_url="http://127.0.0.1:9/v1")
+    await store.save_ai_config(AIConfig())
     async with engine.new_session() as session:
         group = await session.get(Group, guard_group)
         group.sanity_limit, group.allow_r18g = limit, allow_gore

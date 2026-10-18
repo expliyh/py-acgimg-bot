@@ -1,4 +1,5 @@
 import asyncio
+from ai_helpers import configure_ai
 from types import SimpleNamespace
 from datetime import timedelta
 
@@ -7,7 +8,7 @@ from telegram import Update
 from telegram.error import BadRequest
 
 from services.moderation import runtime, store, worker, verification, username_review
-from services.moderation.schemas import AIConfig, UsernameReviewConfig, UsernameVerdict
+from services.moderation.schemas import UsernameReviewConfig, UsernameVerdict
 from unittest.mock import AsyncMock
 from services.moderation.username_review import REMOVAL_NOTICE
 from models import GuardTask
@@ -72,7 +73,7 @@ async def enable_ai_review(group_id):
         "username_review_enabled": True, "username_ai_check": True,
         "welcome_enabled": True,
     })
-    await store.save_ai_config(AIConfig(base_url="http://127.0.0.1:9/v1", text_model="test"))
+    await configure_ai(base_url="http://127.0.0.1:9/v1", text_model="test")
 
 
 async def test_ai_receives_both_labeled_name_fields(guard_group, monkeypatch):

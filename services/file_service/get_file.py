@@ -21,6 +21,11 @@ CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 _LOCAL_STORAGE_ROOT: Path | None = None
 
 
+def reset_local_storage_root() -> None:
+    global _LOCAL_STORAGE_ROOT
+    _LOCAL_STORAGE_ROOT = None
+
+
 async def _get_local_storage_root() -> Path | None:
     global _LOCAL_STORAGE_ROOT
     if _LOCAL_STORAGE_ROOT is not None:

@@ -99,6 +99,8 @@ async def patch_policy(group_id: int, payload: PolicyPatch):
         result = await store.save_policy(group_id, changes)
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     await store.event(
         group_id,
         "configuration",
@@ -391,12 +393,15 @@ async def stats(group_id: int):
 
 @model_router.get("")
 async def get_ai():
-    return store.public_ai_config(await store.ai_config())
+    return await store.ai_config()
 
 
 @model_router.put("")
 async def put_ai(payload: AIConfig):
-    return await store.save_ai_config(payload)
+    try:
+        return await store.save_ai_config(payload)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @username_router.get("", response_model=UsernameReviewConfig)

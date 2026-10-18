@@ -1,5 +1,7 @@
 """Group moderation fixtures: isolated database, fake Telegram, no paid services."""
 
+from ai_helpers import configure_ai
+
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -12,7 +14,6 @@ from models import Group
 from registries import engine
 from services import group_guard
 from services.moderation import rules, store
-from services.moderation.schemas import AIConfig
 from services.telegram_cache import telegram_cache_manager
 
 
@@ -103,13 +104,7 @@ def guard_ai_job(guard_group, guard_message):
             guard_group, {"ai_spam": True} | (policy or {})
         )
         # Loopback only: even an accidentally unmocked classifier cannot reach a provider.
-        await store.save_ai_config(
-            AIConfig(
-                base_url="http://127.0.0.1:9/v1",
-                text_model="test-text",
-                vision_model="test-vision",
-            )
-        )
+        await configure_ai(base_url="http://127.0.0.1:9/v1", text_model="test-text", vision_model="test-vision")
         message = guard_message(**message_values)
         version = rules.version(message)
         await store.put_record(

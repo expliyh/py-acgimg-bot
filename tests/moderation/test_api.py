@@ -378,23 +378,28 @@ async def test_deleting_announcement_cancels_only_its_pending_tasks(api, guard_g
 
 async def test_model_secret_omit_preserves_and_empty_clears_without_echo(api):
     initial = {
+        "name": "Provider",
         "base_url": "https://model.example/v1",
-        "text_model": "test",
+        "models": [{"id": "test"}, {"id": "updated"}],
         "api_key": "test-secret-value",
     }
-    assert (await api.put("/api/guard-ai", json=initial)).json()["has_api_key"]
+    created = await api.post("/api/ai/providers", json=initial)
+    assert created.status_code == 201 and created.json()["has_api_key"]
+    endpoint = "/api/ai/providers/" + created.json()["id"]
+    initial.pop("api_key")
     for extra in ({}, {"api_key": None}):
         response = await api.put(
-            "/api/guard-ai", json={"text_model": "updated"} | extra
+            endpoint, json=initial | extra
         )
         assert response.status_code == 200
         assert response.json()["has_api_key"]
         assert "test-secret-value" not in response.text
-        assert (await store.ai_config()).api_key == "test-secret-value"
-    response = await api.put("/api/guard-ai", json={"api_key": ""})
+        from services.ai import providers
+        assert (await providers.all_providers())[0].api_key == "test-secret-value"
+    response = await api.put(endpoint, json=initial | {"api_key": ""})
     assert not response.json()["has_api_key"]
-    assert not (await store.ai_config()).api_key
-    assert "api_key" not in (await api.get("/api/guard-ai")).json()
+    assert not (await providers.all_providers())[0].api_key
+    assert "test-secret-value" not in (await api.get("/api/ai/providers")).text
 
 
 async def test_webhook_secret_required_and_valid_request_dispatched(api, monkeypatch):
