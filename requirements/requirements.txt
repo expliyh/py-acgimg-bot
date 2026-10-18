@@ -2,7 +2,7 @@ fastapi~=0.143.1
 uvicorn==0.54.0
 python-telegram-bot[all]==22.8
 sqlalchemy[asyncio]==2.1.4
-asyncmy==0.2.14
+asyncmy==0.2.16
 mariadb==1.1.14
 python-dotenv>=1.2.4,<2.0.0
 aiosqlite==0.22.1
