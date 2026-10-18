@@ -509,6 +509,15 @@ async function toggleSelectedMemberExempt() {
     await loadMemberList();
   }, member.value.exempt ? "已取消豁免" : "已设置豁免");
 }
+async function revokeWarning(warningId: string) {
+  await run(async () => {
+    const result = await guardApi.revoke(groupId.value, warningId);
+    if (result.status !== "success")
+      throw new Error(JSON.stringify(result.data));
+    member.value = await guardApi.member(groupId.value, member.value!.user_id);
+    await loadMemberList();
+  }, "已撤销警告");
+}
 function runMemberAction(next: GuardAction) {
   if (!selectedMemberRow.value) return;
   action.value = next;
@@ -559,6 +568,18 @@ async function saveRule() {
     await refreshRules();
   });
 }
+async function deleteRule(key: string) {
+  await run(async () => {
+    await guardApi.deleteRule(groupId.value, key);
+    await refreshRules();
+  }, "已删除");
+}
+async function deleteLegacyRule(id: number) {
+  await run(async () => {
+    await guardApi.deleteLegacy(groupId.value, id);
+    await refreshRules();
+  }, "已删除");
+}
 async function saveContent() {
   await run(async () => {
     const value = { ...contentForm };
@@ -571,6 +592,12 @@ async function saveContent() {
     contents.value = await guardApi.contents(groupId.value);
     tasks.value = await guardApi.tasks(groupId.value);
   });
+}
+async function deleteContent(row: GuardRecord<GuardContent>) {
+  await run(async () => {
+    await guardApi.deleteContent(groupId.value, row.kind, row.key);
+    contents.value = await guardApi.contents(groupId.value);
+  }, "已删除");
 }
 function editContent(row: GuardRecord<GuardContent>) {
   Object.assign(contentForm, row.data);
@@ -631,6 +658,12 @@ async function saveAI() {
     });
     apiKey.value = "";
   });
+}
+async function clearAIKey() {
+  await run(async () => {
+    const { has_api_key, ...value } = aiConfig.value;
+    aiConfig.value = await guardApi.saveAI({ ...value, api_key: "" });
+  }, "密钥已清除");
 }
 async function saveUsernameConfig() {
   await run(async () => {
@@ -935,12 +968,7 @@ watch(
                     variant="text"
                     color="error"
                     :disabled="busy"
-                    @click="
-                      run(async () => {
-                        await guardApi.deleteRule(groupId, row.key);
-                        await refreshRules();
-                      }, '已删除')
-                    "
+                    @click="deleteRule(row.key)"
                     >删除</VBtn
                   >
                 </td>
@@ -956,12 +984,7 @@ watch(
             <VBtn
               variant="text"
               :disabled="busy"
-              @click="
-                run(async () => {
-                  await guardApi.deleteLegacy(groupId, row.id);
-                  await refreshRules();
-                }, '已删除')
-              "
+              @click="deleteLegacyRule(row.id)"
               >删除</VBtn
             >
           </div>
@@ -1008,12 +1031,7 @@ watch(
           ><VBtn
             variant="text"
             :disabled="busy"
-            @click="
-              run(async () => {
-                const { has_api_key, ...value } = aiConfig;
-                aiConfig = await guardApi.saveAI({ ...value, api_key: '' });
-              }, '密钥已清除')
-            "
+            @click="clearAIKey"
             >清除密钥</VBtn
           >
         </VCardText></VCard
@@ -1102,12 +1120,7 @@ watch(
                 variant="text"
                 color="error"
                 :disabled="busy"
-                @click="
-                  run(async () => {
-                    await guardApi.deleteContent(groupId, row.kind, row.key);
-                    contents = await guardApi.contents(groupId);
-                  }, '已删除')
-                "
+                @click="deleteContent(row)"
                 >删除</VBtn
               >
             </div>
@@ -1431,7 +1444,7 @@ watch(
                 <h3 class="text-subtitle-2">有效警告</h3>
                 <div v-for="warning in member.warnings" :key="warning.id" class="d-flex align-center ga-2">
                   <span class="text-body-2 flex-grow-1">{{ warning.reason || '未填写理由' }}</span>
-                  <VBtn size="small" variant="text" :disabled="busy" @click="run(async () => { const r = await guardApi.revoke(groupId, warning.id); if (r.status !== 'success') throw new Error(JSON.stringify(r.data)); member = await guardApi.member(groupId, member!.user_id); await loadMemberList(); }, '已撤销警告')">撤销</VBtn>
+                  <VBtn size="small" variant="text" :disabled="busy" @click="revokeWarning(warning.id)">撤销</VBtn>
                 </div>
               </div>
               <VBtn variant="tonal" :disabled="busy" @click="toggleSelectedMemberExempt">
