@@ -47,6 +47,50 @@ async def test_downloaded_image_is_resized_and_encoded_locally(
     download.assert_awaited_once_with()
 
 
+async def test_username_and_content_requests_share_provider_concurrency():
+    active = 0
+    maximum = 0
+    requests = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def respond(request):
+        nonlocal active, maximum, requests
+        requests += 1
+        active += 1
+        maximum = max(maximum, active)
+        started.set()
+        await release.wait()
+        active -= 1
+        payload = await request.json()
+        is_username = "用户名" in payload["messages"][0]["content"]
+        content = (
+            {"safe": True, "confidence": 1, "reason": "正常"}
+            if is_username
+            else {"category": "safe", "confidence": 1, "reason": "正常"}
+        )
+        return web.json_response({"choices": [{"message": {"content": json.dumps(content)}}]})
+
+    app = web.Application()
+    app.router.add_post("/chat/completions", respond)
+    async with TestServer(app) as server:
+        config = AIConfig(
+            base_url=str(server.make_url("/")), text_model="text", concurrency=1
+        )
+        content = asyncio.create_task(
+            ai.classify(config, Policy(ai_spam=True), "ordinary")
+        )
+        await asyncio.wait_for(started.wait(), 2)
+        username = asyncio.create_task(ai.check_username(config, "ordinary"))
+        await asyncio.sleep(0.05)
+        assert requests == 1
+        assert active == 1
+        release.set()
+        await asyncio.gather(content, username)
+
+    assert maximum == 1
+
+
 @pytest.mark.parametrize(
     "failure", ["declared_size", "downloaded_size", "invalid_image"]
 )
