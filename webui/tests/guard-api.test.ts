@@ -140,15 +140,14 @@ test('review decisions and disabling an exemption use their intended contract', 
   assert.deepEqual(requests[1].params, { enabled: false });
 });
 
-test('model secret preservation and clearing remain distinguishable on the wire', async () => {
-  const config: AIConfig = { base_url: 'https://model.example/v1', text_model: 'text', vision_model: 'vision', timeout: 20, concurrency: 2 };
+test('each audit selects a provider and model without sending provider credentials', async () => {
+  const config: AIConfig = { ai_text: { provider_id: 'text-provider', model: 'text' }, ai_vision: { provider_id: 'vision-provider', model: 'vision' }, ai_username: null };
   await guardApi.saveAI(config);
-  await guardApi.saveAI({ ...config, api_key: null });
-  await guardApi.saveAI({ ...config, api_key: '' });
-  assert.equal('api_key' in JSON.parse(requests[0].data), false);
-  assert.equal(JSON.parse(requests[1].data).api_key, null);
-  assert.equal(JSON.parse(requests[2].data).api_key, '');
-  assert.ok(requests.every((request) => request.url === '/guard-ai'));
+  assert.deepEqual(JSON.parse(requests[0].data), config);
+  await guardApi.savePolicy(group, { ai_text: config.ai_text, ai_username: { provider_id: 'username-provider', model: 'names' } });
+  assert.deepEqual(JSON.parse(requests[1].data), { ai_text: config.ai_text, ai_username: { provider_id: 'username-provider', model: 'names' } });
+  assert.equal(requests[0].url, '/guard-ai');
+  assert.equal(requests[1].url, root);
 });
 
 test('announcement saves preserve the explicit offset and recurrence timezone', async () => {

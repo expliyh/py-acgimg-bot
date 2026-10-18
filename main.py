@@ -25,12 +25,14 @@ from routers import (
     pixiv_tokens,
     illustrations,
     image_push,
+    ai_providers,
 )
 import uvicorn
 
 from configs import config, db_config_declare
 from registries.config_registry import init_database_config
 from services import pixiv, storage_service, schema_migrator
+from services.ai import providers as ai_provider_service
 from services.moderation import store as moderation_store
 from utils.logging_config import setup_logging
 from utils import frontend_launcher
@@ -54,6 +56,7 @@ async def lifespan(app: FastAPI):
         # Tasks to run during application startup
         await engine.create_all()
         await schema_migrator.ensure_schema_migrations(engine.engine)
+        await ai_provider_service.migrate_legacy_config()
         await moderation_store.ensure_username_config()
         await storage_service.ensure_storage_config_defaults()
         storage = await storage_service.use()
@@ -142,6 +145,7 @@ for router in (
     pixiv_tokens.router,
     illustrations.router,
     image_push.router,
+    ai_providers.router,
 ):
     app.include_router(router)
 

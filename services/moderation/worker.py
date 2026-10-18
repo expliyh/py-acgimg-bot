@@ -11,6 +11,7 @@ from telegram.error import RetryAfter
 from models import GroupGuardPendingVerification as Pending
 from models import GuardEvent, GuardRecord, GuardTask
 from registries import engine
+from services.ai import providers
 
 from . import actions, ai, bot_approval, store, verification
 from .schemas import ActionRequest, Content
@@ -357,7 +358,7 @@ class Worker:
             await asyncio.sleep(1)
 
     async def tick(self):
-        config = await store.ai_config()
+        capacity = await providers.capacity()
         async with engine.new_session() as session:
             due = (
                 await session.scalars(
@@ -380,7 +381,7 @@ class Worker:
                         GuardTask.due_at <= store.now(),
                     )
                     .order_by(GuardTask.due_at)
-                    .limit(max(0, config.concurrency - len(self.children)))
+                    .limit(max(0, capacity - len(self.children)))
                 )
             ).all()
             jobs = [store.dump(job) for job in [*due, *ai_jobs]]

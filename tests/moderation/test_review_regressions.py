@@ -1,5 +1,7 @@
 """Regression cases for automated review findings on PR #124."""
 
+from ai_helpers import configure_ai
+
 import asyncio
 from datetime import timedelta, timezone
 from types import SimpleNamespace
@@ -27,7 +29,6 @@ from services.moderation import (
 )
 from services.moderation.schemas import (
     ActionRequest,
-    AIConfig,
     AIVerdict,
     Content,
     Policy,
@@ -433,9 +434,7 @@ async def test_only_relevant_content_enters_ai_queue(
     guard_group, guard_bot, guard_message, policy, content, queued
 ):
     await store.save_policy(guard_group, policy)
-    await store.save_ai_config(
-        AIConfig(base_url="http://127.0.0.1:9/v1", vision_model="test-vision")
-    )
+    await configure_ai(base_url="http://127.0.0.1:9/v1", vision_model="test-vision")
     message = guard_message(**content)
     await runtime.preprocess(Update(1, message=message), SimpleNamespace(bot=guard_bot))
     async with engine.new_session() as session:
@@ -454,13 +453,7 @@ async def test_preexisting_irrelevant_ai_jobs_do_not_consume_budget(
     job = await guard_ai_job(
         policy={"ai_spam": False, "ai_images": True, "ai_daily_limit": 1}
     )
-    await store.save_ai_config(
-        AIConfig(
-            base_url="http://127.0.0.1:9/v1",
-            text_model=text_model,
-            vision_model="test-vision",
-        )
-    )
+    await configure_ai(base_url="http://127.0.0.1:9/v1", text_model=text_model, vision_model="test-vision")
     classifier = AsyncMock(
         return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {})
     )

@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { AISelection } from './ai-api';
 
 const client = axios.create({ baseURL: "/api", timeout: 30000 });
 export interface UsernameReviewConfig {
@@ -45,6 +46,9 @@ export interface GuardPolicy {
   ai_spam: boolean;
   ai_abuse: boolean;
   ai_images: boolean;
+  ai_text: AISelection | null;
+  ai_vision: AISelection | null;
+  ai_username: AISelection | null;
   ai_auto_threshold: number;
   ai_review_threshold: number;
   ai_daily_limit: number;
@@ -181,13 +185,9 @@ export interface GuardStats {
   total_tokens: number;
 }
 export interface AIConfig {
-  base_url: string;
-  api_key?: string | null;
-  has_api_key?: boolean;
-  text_model: string;
-  vision_model: string;
-  timeout: number;
-  concurrency: number;
+  ai_text: AISelection | null;
+  ai_vision: AISelection | null;
+  ai_username: AISelection | null;
 }
 export interface GuardTask {
   id: string;

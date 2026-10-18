@@ -1,5 +1,7 @@
 """Image boundaries and untrusted classifier output, without external requests."""
 
+from ai_helpers import configure_ai, request_config
+
 import asyncio
 import base64
 import io
@@ -16,7 +18,7 @@ from sqlalchemy import select
 from models import Group, GuardEvent
 from registries import engine
 from services.moderation import ai, store, worker
-from services.moderation.schemas import AIConfig, AIVerdict, Policy
+from services.moderation.schemas import AIVerdict, Policy
 
 
 def photo(file_size=100):
@@ -29,6 +31,40 @@ def photo(file_size=100):
             "file_size": file_size,
         }
     ]
+
+
+@pytest.mark.parametrize("image,failure,expected", [
+    (False, False, "text"), (True, False, "vision"), (True, True, "text"),
+])
+async def test_audits_resolve_their_own_provider_and_model(
+    guard_bot, guard_ai_job, monkeypatch, image, failure, expected,
+):
+    from services.ai import providers
+    from services.ai.schemas import ProviderInput
+
+    text_provider = await providers.save(ProviderInput(
+        name="Text", base_url="http://127.0.0.1:8/v1", models=[{"id": "text"}], api_key="text-key",
+    ))
+    vision_provider = await providers.save(ProviderInput(
+        name="Vision", base_url="http://127.0.0.1:7/v1", models=[{"id": "vision", "input_types": ["text", "image"]}], api_key="vision-key",
+    ))
+    overrides = {
+        "ai_text": {"provider_id": text_provider.id, "model": "text"},
+        "ai_vision": {"provider_id": vision_provider.id, "model": "vision"},
+        "ai_images": image,
+    }
+    job = await guard_ai_job(policy=overrides, **({"photo": photo()} if image else {}))
+    monkeypatch.setattr(ai, "known_image_grade", AsyncMock(return_value=None))
+    monkeypatch.setattr(ai, "image_data", AsyncMock(
+        side_effect=ValueError("download failed") if failure else None,
+        return_value="data:image/jpeg;base64,dGVzdA==",
+    ))
+    classifier = AsyncMock(return_value=(AIVerdict(category="safe", confidence=1, reason="safe"), {}))
+    monkeypatch.setattr(ai, "classify", classifier)
+    assert await ai.process(guard_bot, job) == "allow"
+    resolved = classifier.await_args.args[0]
+    assert resolved.model == expected and resolved.api_key == f"{expected}-key"
+    assert resolved.provider_id == (text_provider.id if expected == "text" else vision_provider.id)
 
 
 async def test_downloaded_image_is_resized_and_encoded_locally(
@@ -74,9 +110,7 @@ async def test_username_and_content_requests_share_provider_concurrency():
     app = web.Application()
     app.router.add_post("/chat/completions", respond)
     async with TestServer(app) as server:
-        config = AIConfig(
-            base_url=str(server.make_url("/")), text_model="text", concurrency=1
-        )
+        config = request_config(base_url=str(server.make_url("/")), concurrency=1, model="text")
         content = asyncio.create_task(
             ai.classify(config, Policy(ai_spam=True), "ordinary")
         )
@@ -177,9 +211,7 @@ async def test_provider_shapes_leave_no_running_event(
     app = web.Application()
     app.router.add_post("/v1/chat/completions", respond)
     async with TestServer(app) as server:
-        await store.save_ai_config(AIConfig(
-            base_url=str(server.make_url("/v1")), text_model="test"
-        ))
+        await configure_ai(base_url=str(server.make_url("/v1")), text_model="test")
         assert await ai.process(guard_bot, job) == (
             "allow" if shape == "null_usage" else "failed"
         )
@@ -225,11 +257,7 @@ async def test_classifier_rejects_provider_failures(failure):
     async with TestServer(app) as server:
         with pytest.raises(ValueError):
             await ai.classify(
-                AIConfig(
-                    base_url=str(server.make_url("/v1")),
-                    api_key="fake-test-key",
-                    text_model="test",
-                ),
+                request_config(base_url=str(server.make_url("/v1")), api_key="fake-test-key", model="test"),
                 Policy(ai_spam=True),
                 "spam",
             )
@@ -265,11 +293,7 @@ async def test_text_request_truncates_evidence_and_filters_usage():
     app.router.add_post("/chat/completions", respond)
     async with TestServer(app) as server:
         verdict, usage = await ai.classify(
-            AIConfig(
-                base_url=str(server.make_url("/")),
-                text_model="text-only",
-                vision_model="vision",
-            ),
+            request_config(base_url=str(server.make_url("/")), model="text-only"),
             Policy(ai_spam=True),
             "x" * 20000,
         )
@@ -311,7 +335,7 @@ async def test_classifier_reads_fragmented_response_to_eof():
     app.router.add_post("/chat/completions", respond)
     async with TestServer(app) as server:
         verdict, usage = await ai.classify(
-            AIConfig(base_url=str(server.make_url("/")), text_model="text-only"),
+            request_config(base_url=str(server.make_url("/")), model="text-only"),
             Policy(ai_spam=True),
             "ordinary",
         )
@@ -472,7 +496,7 @@ async def test_known_grade_does_not_require_download_or_models(
         text=None,
         document={"file_id": "known", "file_unique_id": "known", "mime_type": "image/png"},
     )
-    await store.save_ai_config(AIConfig(base_url="http://127.0.0.1:9/v1"))
+    await configure_ai(base_url="http://127.0.0.1:9/v1")
     async with engine.new_session() as session:
         group = await session.get(Group, guard_group)
         group.sanity_limit, group.allow_r18g = limit, allow_gore

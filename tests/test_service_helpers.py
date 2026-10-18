@@ -46,6 +46,25 @@ async def test_local_storage_returns_relative_path_without_base_url(tmp_path, mo
     assert await storage.upload(b"x", "file.bin") == "file.bin"
 
 
+async def test_storage_update_reloads_configuration_before_the_next_upload(tmp_path, monkeypatch):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    get_config = AsyncMock(side_effect=[
+        SimpleNamespace(root_path=str(first), base_url=None),
+        SimpleNamespace(root_path=str(second), base_url="https://cdn.example"),
+    ])
+    monkeypatch.setattr(
+        "services.storage_service.local.config_registry.get_local_storage_config", get_config,
+    )
+    storage = LocalStorage()
+    await storage.upload(b"first", "before.jpg")
+    await storage.invalidate_config()
+    assert await storage.upload(b"second", "after.jpg") == "https://cdn.example/after.jpg"
+    assert (first / "before.jpg").read_bytes() == b"first"
+    assert (second / "after.jpg").read_bytes() == b"second"
+    assert get_config.await_count == 2
+
+
 def test_file_locks_are_reused_and_can_be_deleted():
     file_lock.file_locks.clear()
     dictionary_lock, first = file_lock.get_lock("one")

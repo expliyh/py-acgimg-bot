@@ -126,12 +126,18 @@ async def add_config(config: Config, default: str | bool) -> None:
 
 
 async def update_config(key: str, value: str | bool) -> None:
-    config = Config(key=key)
-    config.value_str = value if isinstance(value, str) else None
-    config.value_bool = value if isinstance(value, bool) else None
+    await update_configs({key: value})
 
+
+async def update_configs(values: dict[str, str | bool]) -> None:
+    """Save one configuration section atomically."""
     async with engine.new_session() as session:
-        await session.merge(config)
+        for key, value in values.items():
+            await session.merge(Config(
+                key=key,
+                value_str=value if isinstance(value, str) else None,
+                value_bool=value if isinstance(value, bool) else None,
+            ))
         await session.commit()
 
 

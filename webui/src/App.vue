@@ -24,9 +24,7 @@ const navItems = [
   { label: '图片图库', icon: 'mdi-image-multiple-outline', to: '/illustrations', group: '内容管理' },
   { label: '插画导入', icon: 'mdi-image-plus-outline', to: '/illustrations/import', group: '内容管理' },
   { label: '图片推送', icon: 'mdi-send-check-outline', to: '/image-push', group: '内容管理' },
-  { label: '功能配置', icon: 'mdi-tune-variant', to: '/features', group: '系统设置' },
-  { label: 'Bot Token', icon: 'mdi-key-outline', to: '/bot-tokens', group: '系统设置' },
-  { label: 'Pixiv Token', icon: 'mdi-palette-outline', to: '/pixiv-tokens', group: '系统设置' }
+  { label: '全局配置', icon: 'mdi-cog-outline', to: '/global-config', group: '系统设置' }
 ];
 const activePath = computed(() => route.path);
 const activeItem = computed(() => navItems.find((item) => item.to === route.path)

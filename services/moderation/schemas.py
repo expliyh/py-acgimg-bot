@@ -1,8 +1,8 @@
 import unicodedata
 from datetime import datetime
 from typing import Literal
-from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
+from services.ai.schemas import AISelection
 
 from pydantic import (
     BaseModel,
@@ -111,6 +111,9 @@ class Policy(StrictModel):
     ai_spam: bool = False
     ai_abuse: bool = False
     ai_images: bool = False
+    ai_text: AISelection | None = None
+    ai_vision: AISelection | None = None
+    ai_username: AISelection | None = None
     ai_auto_threshold: float = Field(0.95, ge=0.7, le=1)
     ai_review_threshold: float = Field(0.7, ge=0, le=1)
     ai_daily_limit: int = Field(500, ge=1, le=100000)
@@ -286,29 +289,9 @@ class Content(StrictModel):
 
 
 class AIConfig(StrictModel):
-    base_url: str = ""
-    api_key: str | None = Field(None, max_length=2000)
-    text_model: str = Field("", max_length=200)
-    vision_model: str = Field("", max_length=200)
-    timeout: int = Field(20, ge=5, le=120)
-    concurrency: int = Field(2, ge=1, le=10)
-
-    @field_validator("base_url")
-    @classmethod
-    def valid_url(cls, value):
-        value = value.rstrip("/")
-        if value:
-            url = urlparse(value)
-            if (
-                url.scheme not in {"http", "https"}
-                or not url.hostname
-                or url.username
-                or url.password
-                or url.query
-                or url.fragment
-            ):
-                raise ValueError("需要不含凭据的 HTTP(S) API 地址")
-        return value
+    ai_text: AISelection | None = None
+    ai_vision: AISelection | None = None
+    ai_username: AISelection | None = None
 
 
 class AIVerdict(StrictModel):

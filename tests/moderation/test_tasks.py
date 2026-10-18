@@ -408,6 +408,8 @@ async def test_recovery_continues_claimed_recurring_announcement_without_resend(
 async def test_ai_concurrency_does_not_block_cleanup_and_stop_cancels_calls(
     guard_group, guard_bot, monkeypatch
 ):
+    from ai_helpers import configure_ai
+    await configure_ai(base_url="http://127.0.0.1:9/v1", text_model="test")
     started = asyncio.Event()
     release = asyncio.Event()
     active, cancelled = set(), set()
