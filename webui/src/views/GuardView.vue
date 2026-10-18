@@ -155,6 +155,11 @@ const categories: Record<
       "kick_on_timeout",
       "join_auto_approve",
       "join_requests_enabled",
+      "username_review_enabled",
+      "username_sensitive_words",
+      "username_block_emoji",
+      "username_block_abnormal_chars",
+      "username_ai_check",
       "raid_enabled",
       "raid_window",
       "raid_limit",
@@ -216,6 +221,11 @@ const labels: Record<keyof GuardPolicy, string> = {
   keyword_filter_enabled: "启用原有关键词过滤",
   join_auto_approve: "自动批准入群申请",
   join_requests_enabled: "启用入群申请处理",
+  username_review_enabled: "启用用户名审核",
+  username_sensitive_words: "用户名敏感词（逗号分隔）",
+  username_block_emoji: "禁止含 Emoji 的用户名入群",
+  username_block_abnormal_chars: "禁止含异常字符的用户名入群",
+  username_ai_check: "启用 AI 用户名检查",
   rules_enabled: "启用规则审核",
   domain_allowlist: "域名白名单（逗号分隔）",
   flood_enabled: "启用反刷屏",
@@ -278,7 +288,7 @@ function displayValue(key: keyof GuardPolicy) {
 function setField(key: keyof GuardPolicy, value: unknown) {
   if (!policy.value) return;
   const converted =
-    key === "domain_allowlist"
+    key === "domain_allowlist" || key === "username_sensitive_words"
       ? String(value)
           .split(",")
           .map((s) => s.trim())
@@ -810,7 +820,7 @@ watch(
             </VCol>
           </VRow>
           <p v-if="tab === 'content' || tab === 'join'" class="text-caption">
-            模板支持 {user}、{chat}、{timeout}；内容以纯文本发送。
+            入群审核会在 Join Request 批准前和直接入群事件发生时执行；用户名敏感词不区分大小写。
           </p>
           <VBtn :loading="busy" @click="savePolicy"
             >保存群级设置</VBtn

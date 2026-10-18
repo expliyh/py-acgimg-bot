@@ -12,6 +12,11 @@ export interface GuardPolicy {
   verification_mode: "button" | "math";
   join_auto_approve: boolean;
   join_requests_enabled: boolean;
+  username_review_enabled: boolean;
+  username_sensitive_words: string[];
+  username_block_emoji: boolean;
+  username_block_abnormal_chars: boolean;
+  username_ai_check: boolean;
   rules_enabled: boolean;
   flood_enabled: boolean;
   flood_window: number;

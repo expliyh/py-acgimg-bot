@@ -12,7 +12,7 @@ from telegram.error import RetryAfter, TelegramError
 from models import GroupGuardPendingVerification as Pending
 from registries import engine
 
-from . import actions, reviews, rules, store
+from . import actions, reviews, rules, store, username_review
 from .schemas import Policy
 
 logger = logging.getLogger(__name__)
@@ -466,6 +466,13 @@ async def joined(bot, chat, member, *, lock_held=False):
         from . import bot_approval
 
         return await bot_approval.joined(bot, chat, member, settings=settings, lock_held=lock_held)
+    try:
+        hit = await username_review.inspect_with_ai(member, settings)
+    except Exception as exc:
+        await store.event(chat.id, "username_review", status="failed", user_id=member.id, reason=type(exc).__name__)
+        hit = None
+    if hit:
+        return await username_review.reject_member(bot, chat, member, hit["reason"])
     raid = False
     if settings.raid_enabled:
         count = rules.window((chat.id, "joins"), settings.raid_window)
@@ -506,6 +513,16 @@ async def join_request(update, context):
     request = update.chat_join_request
     group_id = request.chat.id
     settings = await store.policy(group_id)
+    if not settings.join_requests_enabled and not settings.username_review_enabled:
+        return
+    try:
+        hit = await username_review.inspect_with_ai(request.from_user, settings)
+    except Exception as exc:
+        await store.event(group_id, "username_review", status="failed", user_id=request.from_user.id, reason=type(exc).__name__)
+        hit = None
+    if hit:
+        await username_review.reject_request(context.bot, request, hit["reason"])
+        return
     if not settings.join_requests_enabled:
         return
     receipt, fresh = await store.event(
