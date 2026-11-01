@@ -19,7 +19,6 @@ body { background: rgb(var(--v-theme-background)); }
 .sidebar-group .v-list-subheader { min-height: 30px; padding-inline: 12px; font-size: .68rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; color: rgb(var(--v-theme-on-surface), .48); }
 .sidebar-group .v-list-item { min-height: 42px; margin: 2px 0; color: rgb(var(--v-theme-on-surface), .72); }
 .sidebar-group .v-list-item--active { color: rgb(var(--v-theme-primary)); background: color-mix(in srgb, rgb(var(--v-theme-primary)) 10%, transparent); font-weight: 650; }
-.sidebar-footer { display: flex; gap: 8px; align-items: center; margin: auto 8px 0; padding: 12px; border-radius: 12px; background: color-mix(in srgb, rgb(var(--v-theme-primary)) 7%, transparent); color: rgb(var(--v-theme-on-surface), .62); font-size: .72rem; line-height: 1.4; }
 .skip-link { position: fixed; left: 16px; top: 8px; z-index: 1000; padding: 8px 12px; color: white; background: rgb(var(--v-theme-primary)); border-radius: 8px; transform: translateY(-150%); transition: transform .15s; }
 .skip-link:focus { transform: translateY(0); }
 .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
