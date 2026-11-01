@@ -34,9 +34,5 @@ function isActive(item: NavItem): boolean {
       @click="emit('navigate')"
     />
     </v-list>
-    <div class="sidebar-footer">
-      <v-icon icon="mdi-shield-check-outline" size="18" color="primary" />
-      <span>内容与群组，一处管理</span>
-    </div>
   </nav>
 </template>

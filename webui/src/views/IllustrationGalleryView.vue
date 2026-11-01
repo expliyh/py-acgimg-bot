@@ -546,7 +546,6 @@ onUnmounted(stopQueuePolling);
     <header class="d-flex align-start justify-space-between flex-wrap ga-3">
       <div>
         <h1 class="text-h4 font-weight-bold ma-0">图片图库</h1>
-        <p class="text-body-2 text-medium-emphasis mt-2 mb-0">浏览和维护已添加的 Pixiv 与手动图片。媒体通过受控接口读取，不暴露原始存储地址。</p>
       </div>
       <div class="d-flex ga-2">
         <VBtn prepend-icon="mdi-image-plus-outline" variant="outlined" to="/illustrations/import">添加图片</VBtn>
