@@ -8,6 +8,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
+from auth_helpers import login_test_admin_async
 from models import Group, GuardTask, Illustration, ImagePushDelivery
 from registries import engine, illust_registry
 from services import image_push
@@ -22,6 +23,7 @@ async def push_api(guard_group, guard_bot, monkeypatch):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
+        await login_test_admin_async(client)
         yield client
 
 

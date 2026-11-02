@@ -54,6 +54,20 @@ WebAdmin 前端要求 Node.js `>=22.12.0`（Docker 构建阶段使用 Node 24）
 
   `DATABASE_TYPE` 缺省为 `sqlite`；设为 `mysql` 或 `mariadb` 时使用 `mariadb+asyncmy` 驱动连接。
 
+## 管理端登录
+
+管理端 `/api` 下的所有管理接口都需要登录，未登录请求返回 `401`，前端会自动跳转到 `/login`。登录成功后使用签名后的 HttpOnly 会话 Cookie（默认 12 小时，`SameSite=Lax`）。
+
+- 推荐通过环境变量配置初始凭据：
+  - `ADMIN_USERNAME`：登录用户名，缺省为 `admin`。
+  - `ADMIN_PASSWORD`：登录密码；设置后以环境变量为准，修改密码需更新该变量并重启。
+- 未设置 `ADMIN_PASSWORD` 时，首次启动会生成随机密码，数据库只保存 PBKDF2 哈希，明文写入 `storage/admin-initial-password.txt`。登录后可在右上角账号菜单修改密码，随后删除该文件。
+- 可选环境变量：
+  - `ADMIN_SESSION_TTL_SECONDS`：会话有效期（秒），默认 `43200`。
+  - `ADMIN_COOKIE_SECURE`：设为 `1` 时强制 Cookie 仅通过 HTTPS 发送；反向代理传入 `X-Forwarded-Proto: https` 时会自动启用。
+  - `ADMIN_LOGIN_MAX_ATTEMPTS` / `ADMIN_LOGIN_WINDOW_SECONDS`：登录失败限流次数与窗口，默认 5 次 / 300 秒。
+- 部署方仍可在反向代理层叠加 Basic Auth、IP 白名单或 TLS；内置登录不依赖外部网关。
+
 后端已实现仪表盘、群组管理、私聊管理以及全局功能开关等 RESTful API，前端控制台通过这些接口实现实时管理能力，并预留了未来功能扩展位置。
 
 管理端「全局配置」（`/global-config`）集中提供功能开关、Telegram Bot Token、Pixiv Token、AI 提供商、审核默认模型、全局用户名词库、图片存储、Telegram 缓存与超级管理员设置。AI 提供商支持多个服务和多个模型，统一管理地址、密钥、超时与并发；文本、图片和用户名审核分别选择提供商和模型，群组功能页面可覆盖全局默认。存储支持本地、Backblaze B2、WebDAV 和禁用，保存后在下次文件操作时读取新配置；缓存保存后自动重置。超级管理员列表留空会允许所有用户使用机器人管理命令。

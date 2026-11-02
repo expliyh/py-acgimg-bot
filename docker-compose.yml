@@ -3,6 +3,8 @@ services:
     build:
       context: .
     image: py-acgimg-bot:latest
+    env_file:
+      - .env
     environment:
       DATABASE_HOST: mariadb
       DATABASE_PORT: 3306

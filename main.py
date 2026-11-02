@@ -4,9 +4,11 @@ import hmac
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from urllib.parse import quote
+
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from telegram import Update, Bot
 
@@ -16,6 +18,7 @@ from bot import tg_bot
 from contextlib import asynccontextmanager
 from registries import engine, config_registry
 from routers import (
+    auth as auth_routes,
     configs as config_routes,
     dashboard,
     groups,
@@ -31,7 +34,7 @@ import uvicorn
 
 from configs import config, db_config_declare
 from registries.config_registry import init_database_config
-from services import pixiv, storage_service, schema_migrator
+from services import admin_auth, pixiv, storage_service, schema_migrator
 from services.ai import providers as ai_provider_service
 from services.moderation import store as moderation_store
 from utils.logging_config import setup_logging
@@ -56,6 +59,7 @@ async def lifespan(app: FastAPI):
         # Tasks to run during application startup
         await engine.create_all()
         await schema_migrator.ensure_schema_migrations(engine.engine)
+        await admin_auth.ensure_admin_credentials()
         await ai_provider_service.migrate_legacy_config()
         await moderation_store.ensure_username_config()
         await storage_service.ensure_storage_config_defaults()
@@ -102,6 +106,70 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Public auth entry points only. Every other /api route is protected both by
+# the router-level dependency below and by this path-level fallback, so a newly
+# added router cannot accidentally expose an unauthenticated admin endpoint.
+_PUBLIC_API_PATHS = {"/api/auth/login", "/api/auth/me", "/api/auth/logout"}
+_PROTECTED_DOCUMENTATION_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+
+
+def _unauthorized_response() -> JSONResponse:
+    payload = ErrorResponse(
+        error=ErrorBody(
+            code=error_code(401),
+            message=error_message("请先登录管理端"),
+        )
+    )
+    return JSONResponse(status_code=401, content=payload.model_dump(exclude_none=True))
+
+
+class AdminSessionMiddleware:
+    """Pure ASGI auth fallback that never wraps unrelated request bodies."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+
+        path = (scope.get("path") or "/").rstrip("/") or "/"
+        method = (scope.get("method") or "GET").upper()
+        if method == "OPTIONS":
+            return await self.app(scope, receive, send)
+
+        is_admin_static = dist_dir.exists() and (path == "/admin" or path.startswith("/admin/"))
+        protected_api = (path == "/api" or path.startswith("/api/")) and path not in _PUBLIC_API_PATHS
+        protected_docs = path in _PROTECTED_DOCUMENTATION_PATHS
+        if not (is_admin_static or protected_api or protected_docs):
+            # Leave unrelated routes (Telegram webhook, root redirect, etc.)
+            # untouched so they keep their existing request/response streaming.
+            return await self.app(scope, receive, send)
+
+        authenticated = bool(admin_auth.current_username(Request(scope)))
+
+        # Only the login page and hashed assets are public in the built SPA.
+        # Direct navigation to a protected client route goes through /admin/login.
+        if is_admin_static:
+            relative = path[len("/admin"):].strip("/")
+            is_asset = relative.startswith("assets/") or bool(Path(relative).suffix)
+            if not authenticated and relative != "login" and not is_asset:
+                target = "/admin/login"
+                if relative:
+                    target = f"{target}?redirect={quote('/' + relative, safe='')}"
+                response = RedirectResponse(url=target, status_code=307)
+                await response(scope, receive, send)
+                return
+
+        if (protected_api or protected_docs) and not authenticated:
+            response = _unauthorized_response()
+            await response(scope, receive, send)
+            return
+        return await self.app(scope, receive, send)
+
+
+app.add_middleware(AdminSessionMiddleware)
+
 
 @app.exception_handler(HTTPException)
 async def handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
@@ -112,7 +180,11 @@ async def handle_http_exception(request: Request, exc: HTTPException) -> JSONRes
             message=error_message(exc.detail),
         )
     )
-    return JSONResponse(status_code=exc.status_code, content=payload.model_dump(exclude_none=True))
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=payload.model_dump(exclude_none=True),
+        headers=exc.headers,
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -132,6 +204,9 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     )
     return JSONResponse(status_code=422, content=payload.model_dump(exclude_none=True))
 
+# Every administrative API requires a valid Web admin session. The auth
+# router itself stays public so clients can log in and query their session.
+app.include_router(auth_routes.router)
 for router in (
     guard_routes.router,
     guard_routes.model_router,
@@ -147,7 +222,7 @@ for router in (
     image_push.router,
     ai_providers.router,
 ):
-    app.include_router(router)
+    app.include_router(router, dependencies=[Depends(admin_auth.require_admin)])
 
 webui_dir = Path(__file__).parent / "webui"
 dist_dir = webui_dir / "dist"
@@ -161,11 +236,6 @@ else:
     @app.get("/")
     async def root():
         return {"message": "Hello World"}
-
-
-@app.get("/hello/{name}")
-async def say_hello(name: str):
-    return {"message": f"Hello {name}"}
 
 
 @app.post("/tapi/")

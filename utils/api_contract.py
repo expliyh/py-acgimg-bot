@@ -41,9 +41,12 @@ def page_offset(page: int, page_size: int) -> int:
 def error_code(status_code: int) -> str:
     return {
         400: "bad_request",
+        401: "unauthorized",
+        403: "forbidden",
         404: "not_found",
         409: "conflict",
         422: "validation_error",
+        429: "rate_limited",
         502: "upstream_error",
         503: "service_unavailable",
     }.get(status_code, "internal_error")

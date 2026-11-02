@@ -1,10 +1,14 @@
 import axios from 'axios';
 import { collectAllPages } from '@/utils/table-options';
 
+import { installUnauthorizedInterceptor } from './authorized-client.ts';
+
 const client = axios.create({
   baseURL: '/api',
-  timeout: 15000
+  timeout: 15000,
+  withCredentials: true
 });
+installUnauthorizedInterceptor(client);
 
 export type SystemConfigSection = 'storage' | 'cache' | 'access';
 export type SystemConfigValues = Record<string, string | number | boolean>;

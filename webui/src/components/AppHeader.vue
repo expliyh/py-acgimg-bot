@@ -3,7 +3,12 @@ import { useAttrs } from 'vue';
 
 defineProps<{ dark: boolean }>();
 const attrs = useAttrs();
-const emit = defineEmits<{ (e: 'toggle-theme'): void; (e: 'toggle-drawer'): void }>();
+const emit = defineEmits<{
+  (e: 'toggle-theme'): void;
+  (e: 'toggle-drawer'): void;
+  (e: 'change-password'): void;
+  (e: 'logout'): void;
+}>();
 </script>
 
 <template>
@@ -19,6 +24,23 @@ const emit = defineEmits<{ (e: 'toggle-theme'): void; (e: 'toggle-drawer'): void
       <span>{{ attrs.pageTitle ?? attrs['page-title'] }}</span>
     </div>
     <v-spacer />
-    <v-btn icon="mdi-theme-light-dark" variant="text" class="mr-3" :aria-label="dark ? '切换亮色主题' : '切换暗色主题'" :title="dark ? '切换亮色主题' : '切换暗色主题'" @click="emit('toggle-theme')" />
+    <v-btn icon="mdi-theme-light-dark" variant="text" class="mr-2" :aria-label="dark ? '切换亮色主题' : '切换暗色主题'" :title="dark ? '切换亮色主题' : '切换暗色主题'" @click="emit('toggle-theme')" />
+    <v-menu location="bottom end">
+      <template #activator="{ props: menuProps }">
+        <v-btn
+          v-bind="menuProps"
+          variant="text"
+          prepend-icon="mdi-account-circle-outline"
+          :aria-label="`当前账号 ${attrs.username ?? attrs['username'] ?? '管理员'}`"
+        >
+          <span class="d-none d-sm-inline">{{ attrs.username ?? attrs['username'] ?? '管理员' }}</span>
+          <v-icon icon="mdi-chevron-down" size="18" class="ml-1" />
+        </v-btn>
+      </template>
+      <v-list density="compact" min-width="180">
+        <v-list-item prepend-icon="mdi-lock-reset" title="修改密码" @click="emit('change-password')" />
+        <v-list-item prepend-icon="mdi-logout" title="退出登录" @click="emit('logout')" />
+      </v-list>
+    </v-menu>
   </v-app-bar>
 </template>

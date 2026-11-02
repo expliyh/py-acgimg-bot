@@ -6,6 +6,7 @@ import httpx
 import pytest
 from sqlalchemy import text
 
+from auth_helpers import login_test_admin_async
 from defines import GroupChatMode, UserStatus
 from models import Group, User
 from registries import engine
@@ -18,6 +19,7 @@ async def review_api():
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
+        await login_test_admin_async(client)
         yield client
 
 

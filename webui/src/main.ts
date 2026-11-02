@@ -5,8 +5,17 @@ import 'vuetify/styles';
 import '@mdi/font/css/materialdesignicons.css';
 
 import App from './App.vue';
+import { markUnauthenticated } from '@/composables/admin-auth';
 import router from './router';
+import { AUTH_EXPIRED_EVENT } from '@/services/auth-events';
 import '@/styles/main.css';
+
+window.addEventListener(AUTH_EXPIRED_EVENT, () => {
+  markUnauthenticated();
+  const current = router.currentRoute.value;
+  if (current.name === 'login') return;
+  void router.replace({ name: 'login', query: { redirect: current.fullPath } }).catch(() => undefined);
+});
 
 const storedTheme = localStorage.getItem('acgimg-theme');
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

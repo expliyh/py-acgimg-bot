@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
+import { refreshAdminAuth } from '@/composables/admin-auth';
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -11,6 +13,12 @@ const router = createRouter({
     {
       path: '/',
       redirect: '/dashboard'
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { public: true }
     },
     {
       path: '/dashboard',
@@ -110,6 +118,18 @@ const router = createRouter({
       redirect: '/dashboard'
     }
   ]
+});
+
+router.beforeEach(async (to) => {
+  if (to.meta.public) {
+    if (to.name === 'login' && await refreshAdminAuth(true)) {
+      return { name: 'dashboard' };
+    }
+    return true;
+  }
+
+  if (await refreshAdminAuth()) return true;
+  return { name: 'login', query: { redirect: to.fullPath } };
 });
 
 let recoveringFromChunkError = false;

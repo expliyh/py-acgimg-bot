@@ -8,6 +8,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
+from auth_helpers import login_test_admin_async
 from models import Illustration, IllustrationImportTask
 from registries import engine
 
@@ -19,6 +20,7 @@ async def api():
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
+        await login_test_admin_async(client)
         yield client
 
 

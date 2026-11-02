@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select, update
 from telegram.error import BadRequest
 
+from auth_helpers import login_test_admin_async
 from defines import MessageType
 from models import Group, GroupChatHistory, GroupGuardSettings, GuardEvent, GuardRecord, GuardTask, User
 from registries import engine
@@ -29,6 +30,7 @@ async def api(guard_group, guard_bot, monkeypatch):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
+        await login_test_admin_async(client)
         yield client
 
 

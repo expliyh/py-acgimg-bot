@@ -1,11 +1,22 @@
 # Test your FastAPI endpoints
 
-GET http://127.0.0.1:8000/
+### 登录后浏览器/客户端会保存 HttpOnly 会话 Cookie
+POST http://127.0.0.1:8000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "change_me"
+}
+
+###
+
+GET http://127.0.0.1:8000/api/dashboard/summary
 Accept: application/json
 
 ###
 
-GET http://127.0.0.1:8000/hello/User
+POST http://127.0.0.1:8000/api/auth/logout
 Accept: application/json
 
 ###

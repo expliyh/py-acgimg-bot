@@ -1,7 +1,9 @@
 import axios from "axios";
 import type { AISelection } from './ai-api';
+import { installUnauthorizedInterceptor } from './authorized-client.ts';
 
-const client = axios.create({ baseURL: "/api", timeout: 30000 });
+const client = axios.create({ baseURL: "/api", timeout: 30000, withCredentials: true });
+installUnauthorizedInterceptor(client);
 export interface UsernameReviewConfig {
   sensitive_words: string[];
 }

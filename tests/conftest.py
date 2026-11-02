@@ -18,6 +18,12 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Use deterministic credentials for every test process (and the live uvicorn
+# subprocess) before any application module reads the environment.
+from auth_helpers import configure_test_admin, login_test_admin  # noqa: E402
+
+configure_test_admin()
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _isolated_database(tmp_path_factory):
@@ -57,6 +63,7 @@ def client():
     import main
 
     with TestClient(main.app) as test_client:
+        login_test_admin(test_client)
         yield test_client
 
 
@@ -151,4 +158,5 @@ def http_client(live_server_url):
     import httpx
 
     with httpx.Client(base_url=live_server_url, timeout=10) as client:
+        login_test_admin(client)
         yield client

@@ -1,6 +1,7 @@
 """Moderation integration tests with real persistence and fake Telegram/model APIs."""
 
 from ai_helpers import configure_ai, request_config
+from auth_helpers import login_test_admin_async
 
 import asyncio
 import json
@@ -727,6 +728,7 @@ async def test_guard_api_settings_secret_and_isolation(monkeypatch):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
+        await login_test_admin_async(client)
         root = f"/api/groups/{GROUP}/guard"
         assert (
             await client.patch(root, json={"flood_enabled": True})

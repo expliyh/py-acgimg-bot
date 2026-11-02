@@ -11,7 +11,7 @@
    机器人入群审批还需要 `can_restrict_members` 才能在 supergroup 保存并执行逐成员限制；缺少权限时会保留待审批记录，不会把机器人误判为已批准。
 5. 在群里发送 `/guard`，或者在 Web「群组管理」工作区打开「智能群管」。Web 群组管理将基础配置、智能群管、群成员和审核日志合并在同一页面；历史上直接打开 `/guard` 或 `/groups/:id/guard` 的链接会重定向到对应群组工作区。概览显示机器人当前权限。
 
-Web 沿用部署方外部网关身份认证，拥有 Web 访问权限的人员视为部署管理员，可管理全部已登记群。Telegram 管理指令、按钮、旧配置面板及后续文本输入会重新验证真实群管理员身份，不以 Web 可编辑的管理员 ID 列表作为授权依据。
+Web 管理端使用项目内置的登录会话，登录后的部署管理员可管理全部已登记群。Telegram 管理指令、按钮、旧配置面板及后续文本输入会重新验证真实群管理员身份，不以 Web 可编辑的管理员 ID 列表作为授权依据。
 
 ## Telegram 操作
 
@@ -143,7 +143,7 @@ Web 成员警告旁的「撤销」移除选定警告；如果警告减少后未�
 
 轮询模式不需要额外配置。使用 `EXTERNAL_URL` 启用 webhook 时，设置 `TELEGRAM_WEBHOOK_SECRET` 为随机的字母、数字、下划线或短横线字符串（1–256 字符）；机器人注册 webhook 时使用该密钥，后端校验 `X-Telegram-Bot-Api-Secret-Token`。未配置时退回轮询，不接受未鉴权 webhook 请求。
 
-网关应保护 `/admin`、`/api` 和 OpenAPI 页面，仅为 `/tapi/` 保留 Telegram 回调通道。下面展示与已有 Nginx Basic Auth 网关的关系，不包含现有 TLS 配置：
+`/api` 下的管理接口由内置登录会话保护，未登录请求返回 401；`/tapi/` 仍使用 Telegram webhook 密钥。部署方可在网关层叠加 Basic Auth 或 IP 白名单作为额外防护，下面展示可选的 Nginx 配置，不包含 TLS 配置：
 
 ```nginx
 # 位于已有 HTTPS server 中；不要绕过已有更严格的访问控制。

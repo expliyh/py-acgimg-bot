@@ -1,6 +1,8 @@
 import axios from "axios";
+import { installUnauthorizedInterceptor } from './authorized-client.ts';
 
-const client = axios.create({ baseURL: "/api", timeout: 30000 });
+const client = axios.create({ baseURL: "/api", timeout: 30000, withCredentials: true });
+installUnauthorizedInterceptor(client);
 
 export type ImagePushMode = "fixed_same" | "fixed_different" | "random_same" | "random_different";
 export type ImagePushRepeat = "once" | "daily" | "weekly" | "interval";

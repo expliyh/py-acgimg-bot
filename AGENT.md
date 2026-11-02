@@ -40,6 +40,6 @@ taskkill //F //PID <pid>                  # 全部清理（node.exe 同理）
 - 默认 SQLite（`storage/acgimg.db`，已被 .gitignore 忽略），无需任何配置即可启动后端；`DATABASE_TYPE=mysql` 切换 MySQL。
 - 后端启动会自动拉起 Vite dev server（`AUTO_START_FRONTEND=0` 关闭）；`webui/dist` 存在时走静态托管、不启动 dev server。
 - 修改 Bot Token / Pixiv Token 后调用对应 `/reload` 端点即可生效，无需重启。
-- 管理端 API 无鉴权，敏感字段（token 等）在响应中明文返回（前端默认打码显示）。
+- 管理端 API 需要 Web 登录（HttpOnly 会话 Cookie）；登录凭据优先读取 `ADMIN_USERNAME`/`ADMIN_PASSWORD`，未配置密码时首次启动会生成随机密码并写入 `storage/admin-initial-password.txt`。登录相关测试可用 `tests/auth_helpers.py` 的固定凭据。
 - Python 3.14 下 `asyncmy`/`aiohttp` 无预编译 wheel，需本机 MSVC 编译（已装）；`mariadb` 驱动因缺 Connector/C 未安装，代码也未 import 它。
 - 本机 `python` 命令是无效商店 stub，一律用 `py` 或 `.venv/Scripts/python.exe`。

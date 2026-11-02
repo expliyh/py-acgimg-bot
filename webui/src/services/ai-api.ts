@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+import { installUnauthorizedInterceptor } from './authorized-client.ts';
+
 export interface AISelection {
   provider_id: string;
   model: string;
@@ -43,7 +45,8 @@ export interface AIProvider extends Omit<AIProviderInput, 'api_key'> {
   has_api_key: boolean;
 }
 
-const client = axios.create({ baseURL: '/api/ai/providers', timeout: 30000 });
+const client = axios.create({ baseURL: '/api/ai/providers', timeout: 30000, withCredentials: true });
+installUnauthorizedInterceptor(client);
 export const aiApi = {
   list: async (): Promise<AIProvider[]> => (await client.get('')).data,
   create: async (value: AIProviderInput): Promise<AIProvider> => (await client.post('', value)).data,
