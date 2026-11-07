@@ -1,6 +1,6 @@
 """Focused regression coverage for bot join approval and bot moderation."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -633,12 +633,14 @@ async def test_delayed_leave_does_not_clear_new_generation(
     guard_group, guard_bot, helper_bot, guard_message
 ):
     chat = Chat(guard_group, "supergroup", title="Test group")
-    first = guard_message().date
+    # Telegram dates are whole seconds. The rejoin has to be a later second
+    # even when the first event is at second 59; replace(second=n + 1) raises.
+    first = guard_message(
+        date=int(datetime(2024, 6, 1, 12, 0, 59, tzinfo=timezone.utc).timestamp())
+    ).date
     await runtime.member_joined(guard_bot, chat, helper_bot, first)
     await runtime.member_left(guard_group, helper_bot.id, first)
-    second = first.replace(microsecond=0)
-    # A later rejoin receives a distinct generation.
-    second = second.replace(second=second.second + 1)
+    second = first.replace(microsecond=0) + timedelta(seconds=1)
     await runtime.member_joined(guard_bot, chat, helper_bot, second)
     current = await bot_approval.approval_status(guard_group, helper_bot.id)
     await runtime.member_left(guard_group, helper_bot.id, first)

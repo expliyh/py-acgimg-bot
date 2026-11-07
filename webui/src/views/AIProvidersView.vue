@@ -13,6 +13,10 @@ const clearKey = ref(false);
 const busy = ref(false);
 const form = reactive<AIProviderInput>({ name: '', base_url: '', api_key: '', models: [], timeout: 20, concurrency: 2 });
 const formError = ref('');
+// vue-tsc 3.3.14 joins component props onto one line and turns every "//"
+// into a comment, including a static https URL. Later template checks then
+// report a missing `.value` on the reactive form object.
+const apiBasePlaceholder = 'https://api.example.com/v1';
 
 function message(error: unknown) {
   const response = error as { response?: { data?: { detail?: string; error?: { message?: string; fields?: Record<string, string[]> } } } };
@@ -127,7 +131,7 @@ function remove(provider: AIProvider) {
         <VCardText class="d-flex flex-column ga-3">
           <VAlert v-if="formError" type="error" variant="tonal">{{ formError }}</VAlert>
           <VTextField v-model="form.name" label="提供商名称" :disabled="busy" maxlength="100" />
-          <VTextField v-model="form.base_url" label="API 地址" placeholder="https://api.example.com/v1" hint="通常以 /v1 结尾，服务会追加 /chat/completions" persistent-hint :disabled="busy" />
+          <VTextField v-model="form.base_url" label="API 地址" :placeholder="apiBasePlaceholder" hint="通常以 /v1 结尾，服务会追加 /chat/completions" persistent-hint :disabled="busy" />
           <VTextField v-model="form.api_key" label="API 密钥" type="password" autocomplete="new-password" :hint="hasKey ? '已配置，留空保留原密钥' : '可留空，用于无需密钥的服务'" persistent-hint :disabled="busy || clearKey" />
           <VCheckbox v-if="hasKey" v-model="clearKey" label="清除已保存的密钥" :disabled="busy" hide-details />
           <VRow>
