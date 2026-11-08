@@ -69,6 +69,7 @@ class TestBuildIllustFromApiDict:
         assert illust.file_urls == [None]
         assert illust.compressed_file_ids == [None]
         assert illust.original_file_ids == [None]
+        assert illust.source_type == "pixiv"
 
     def test_multi_page(self):
         illust = build_illust_from_api_dict(_multi_page_dict())

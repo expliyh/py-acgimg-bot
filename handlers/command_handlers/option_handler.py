@@ -4,6 +4,7 @@ from telegram import Update, Message, InlineKeyboardMarkup
 
 import messase_generator
 from utils import is_group_type, delete_messages
+from utils.telegram_text import parse_mode_kwargs
 from registries import user_registry, group_registry, engine
 from handlers.callback_handlers.panel_utils import register_panel
 from services.command_history import command_logger
@@ -56,7 +57,8 @@ async def option_handler_func(update: Update, context) -> None:
         message: Message = await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=config.text,
-            reply_markup=InlineKeyboardMarkup(config.keyboard)
+            reply_markup=InlineKeyboardMarkup(config.keyboard),
+            **parse_mode_kwargs(config.parse_mode),
         )
 
         register_panel(context, message.message_id, command_message_id)
@@ -67,7 +69,8 @@ async def option_handler_func(update: Update, context) -> None:
     message: Message = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=config.text,
-        reply_markup=InlineKeyboardMarkup(config.keyboard)
+        reply_markup=InlineKeyboardMarkup(config.keyboard),
+        **parse_mode_kwargs(config.parse_mode),
     )
 
     register_panel(context, message.message_id, command_message_id)

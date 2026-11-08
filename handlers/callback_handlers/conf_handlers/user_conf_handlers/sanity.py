@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 import messase_generator
 from registries import user_registry
+from utils.telegram_text import parse_mode_kwargs
 
 from .panel import refresh_user_config_panel
 
@@ -50,6 +51,7 @@ async def handle_sanity(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd:
             chat_id=update.effective_chat.id,
             message_id=update.effective_message.message_id,
             text=instruction,
+            **parse_mode_kwargs(panel.parse_mode),
         )
         await context.bot.edit_message_reply_markup(
             chat_id=update.effective_chat.id,

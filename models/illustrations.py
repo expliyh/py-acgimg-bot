@@ -31,27 +31,16 @@ class Illustration(Base):
     author_url = Column(Text, nullable=True, comment='自定义作者链接')
 
     def get_markdown(self) -> str:
-        author_url = self.author_url
-        if not author_url and self.source_type == "pixiv" and self.author_id:
-            author_url = f"https://www.pixiv.net/users/{self.author_id}"
-        author = self.author_name or "未知"
-        author_text = f"[{author}]({author_url})" if author_url else author
-        source_text = f"\n\n[来源]({self.source_url})" if self.source_url else ""
-        if self.page_count == 1:
-            return \
-                f"**{self.title}**\n\n" \
-                f"作者: {author_text}\n\n" \
-                f"描述: {self.caption}\n\n" \
-                f"[原图]({self.file_urls[0]}){source_text}\n\n" \
-                f"AI: {'是' if self.is_ai else '否'}"
+        """Return Telegram HTML for this illustration.
 
-        else:
-            return \
-                f"**{self.title}**\n\n" \
-                f"作者: {author_text}\n\n" \
-                f"描述: {self.caption}\n\n" \
-                f"原图: {', '.join([f'[{i + 1}]({self.origin_urls[i]})' for i in range(self.page_count)])}\n\n" \
-                f"AI: {'是' if self.is_ai else '否'}"
+        The name is historical: the text must be sent with parse mode HTML
+        (``messase_generator.illustration.ILLUSTRATION_PARSE_MODE``), not
+        ``reply_markdown``. Title, tags, author, and caption are escaped.
+        """
+
+        from messase_generator.illustration import render_illustration_html
+
+        return render_illustration_html(self)
 
 
 def build_illust_from_api_dict(api_dict: dict) -> Illustration:
@@ -90,7 +79,8 @@ def build_illust_from_api_dict(api_dict: dict) -> Illustration:
         compressed_file_ids=[],
         original_file_ids=[],
         origin_urls=[],
-        file_ext=[]
+        file_ext=[],
+        source_type="pixiv",
     )
     origin_urls: list[str] = []
     file_exts: list[str] = []

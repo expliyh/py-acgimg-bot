@@ -2,10 +2,10 @@ import asyncio
 
 from telegram import Update, Message, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from telegram.constants import ParseMode
 
 import messase_generator
 from utils import is_group_type, delete_messages
+from utils.telegram_text import parse_mode_kwargs
 from services.permissions import has_super_user_access
 from handlers.callback_handlers.panel_utils import register_panel
 from services.command_history import command_logger
@@ -48,7 +48,7 @@ async def admin_handler_func(update: Update, context: ContextTypes.DEFAULT_TYPE)
         chat_id=update.effective_chat.id,
         text=config.text,
         reply_markup=InlineKeyboardMarkup(config.keyboard),
-        parse_mode=ParseMode.MARKDOWN_V2
+        **parse_mode_kwargs(config.parse_mode),
     )
 
     register_panel(context, message.message_id, command_message_id)
