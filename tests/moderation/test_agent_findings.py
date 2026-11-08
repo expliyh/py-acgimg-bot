@@ -142,8 +142,8 @@ async def test_bot_lifecycle_serializes_concurrent_operations(monkeypatch, secon
         apps.append(app)
     builder = MagicMock()
     builder.token.return_value = builder
-    builder.read_timeout.return_value = builder
-    builder.connect_timeout.return_value = builder
+    builder.request.return_value = builder
+    builder.get_updates_request.return_value = builder
     builder.build.side_effect = apps
     workers = []
 
@@ -185,6 +185,7 @@ async def test_bot_lifecycle_serializes_concurrent_operations(monkeypatch, secon
             if not task.done():
                 task.cancel()
         await asyncio.gather(first, second, return_exceptions=True)
+        await bot.shutdown()
 
 
 async def test_catalogue_grades_do_not_exhaust_model_budget(
