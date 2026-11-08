@@ -12,10 +12,15 @@ from models import User
 
 @dataclass(slots=True)
 class ConfigUser:
-    """Container for the rendered user configuration panel."""
+    """Container for the rendered user configuration panel.
+
+    ``text`` is plain. Nicknames are not escaped, and ``parse_mode`` stays
+    empty so characters such as ``_`` or ``*`` are shown literally.
+    """
 
     text: str
     keyboard: list[list[InlineKeyboardButton]]
+    parse_mode: str | None = None
 
 
 _STATUS_LABELS = {

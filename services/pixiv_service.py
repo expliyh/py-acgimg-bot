@@ -17,6 +17,49 @@ from models import Illustration, build_illust_from_api_dict
 
 logger = logging.getLogger(__name__)
 
+_MISSING_WORK_MARKERS = (
+    "存在しない",
+    "存在しません",
+    "削除された",
+    "該当作品",
+    "not exist",
+    "does not exist",
+    "not found",
+    "could not be found",
+    "couldn't find",
+    "不存在",
+    "已删除",
+    "已被删除",
+    "找不到",
+)
+
+
+class PixivWorkNotFound(LookupError):
+    """Pixiv has no visible illustration for this id."""
+
+    def __init__(self, pixiv_id: int | str):
+        self.pixiv_id = str(pixiv_id)
+        super().__init__(f"未找到 Pixiv 作品 {self.pixiv_id}")
+
+
+def _error_text(error: object) -> str:
+    if error is None:
+        return ""
+    if isinstance(error, str):
+        return error
+    if isinstance(error, BaseException):
+        return _error_text(error.args[0] if error.args else "")
+    if isinstance(error, dict):
+        return " ".join(_error_text(value) for value in error.values())
+    if isinstance(error, (list, tuple)):
+        return " ".join(_error_text(value) for value in error)
+    return str(error)
+
+
+def _is_missing_work(error: object) -> bool:
+    text = _error_text(error).casefold()
+    return any(marker.casefold() in text for marker in _MISSING_WORK_MARKERS)
+
 
 @dataclass
 class _TokenState:
@@ -142,6 +185,13 @@ class PixivService:
                 last_error = exc
                 continue
 
+            if not isinstance(response, dict):
+                last_error = RuntimeError("Pixiv API response was not a JSON object")
+                continue
+
+            if _is_missing_work(response.get("error")):
+                raise PixivWorkNotFound(pixiv_id)
+
             if response.get("error"):
                 logger.warning("Pixiv API responded with error for token %s: %s", token.id, response["error"])
                 try:
@@ -151,6 +201,11 @@ class PixivService:
                     token.last_error = str(exc)
                     last_error = exc
                     continue
+                if not isinstance(response, dict):
+                    last_error = RuntimeError("Pixiv API response was not a JSON object")
+                    continue
+                if _is_missing_work(response.get("error")):
+                    raise PixivWorkNotFound(pixiv_id)
                 if response.get("error"):
                     token.last_error = str(response["error"])
                     last_error = RuntimeError(str(response["error"]))
@@ -159,6 +214,8 @@ class PixivService:
             token.last_error = None
             return response
 
+        if _is_missing_work(last_error):
+            raise PixivWorkNotFound(pixiv_id) from last_error
         raise RuntimeError("All Pixiv tokens failed to fetch illust detail") from last_error
 
     async def get_raw(self, pixiv_id: int) -> dict:
@@ -166,8 +223,13 @@ class PixivService:
 
     async def get_illust_info_by_pixiv_id(self, pixiv_id: int) -> Illustration:
         response = await self._fetch_illust_detail(pixiv_id)
-        illust_data = response.get("illust")
+        illust_data = response.get("illust") if isinstance(response, dict) else None
         if not isinstance(illust_data, dict):
+            error_payload = response.get("error") if isinstance(response, dict) else response
+            if _is_missing_work(error_payload):
+                raise PixivWorkNotFound(pixiv_id)
+            if isinstance(response, dict) and error_payload is None and "illust" in response:
+                raise PixivWorkNotFound(pixiv_id)
             raise RuntimeError("Pixiv response missing illust data")
         return build_illust_from_api_dict(illust_data)
 

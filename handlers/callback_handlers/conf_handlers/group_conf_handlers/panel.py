@@ -9,6 +9,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 import messase_generator
+from utils.telegram_text import parse_mode_kwargs
 from handlers.callback_handlers.panel_utils import (
     get_panel_command_message_id,
     register_panel,
@@ -41,6 +42,7 @@ async def refresh_group_config_panel(
             chat_id=chat_id,
             message_id=message_id,
             text=panel.text,
+            **parse_mode_kwargs(panel.parse_mode),
         )
         await context.bot.edit_message_reply_markup(
             chat_id=chat_id,

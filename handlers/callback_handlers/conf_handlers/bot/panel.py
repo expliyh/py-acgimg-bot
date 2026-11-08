@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from handlers.callback_handlers.panel_utils import get_panel_command_message_id, register_panel
 import messase_generator
+from utils.telegram_text import parse_mode_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ async def refresh_bot_config_panel(
             chat_id=chat_id,
             message_id=message_id,
             text=panel.text,
+            **parse_mode_kwargs(panel.parse_mode),
         )
         await context.bot.edit_message_reply_markup(
             chat_id=chat_id,

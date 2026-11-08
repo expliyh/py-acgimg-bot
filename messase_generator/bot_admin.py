@@ -5,15 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from telegram import InlineKeyboardButton
-from telegram.helpers import escape_markdown
 
 from registries import config_registry
+from utils.telegram_text import PARSE_MODE_MARKDOWN_V2, escape_markdown_v2
 
 
 @dataclass(slots=True)
 class BotAdmin:
     text: str
     keyboard: list[list[InlineKeyboardButton]]
+    parse_mode: str | None = PARSE_MODE_MARKDOWN_V2
 
 
 def _bool_icon(value: bool) -> str:
@@ -64,7 +65,7 @@ def _local_ready(config) -> bool:
 
 
 def _md(line: str) -> str:
-    return escape_markdown(line, version=2)
+    return escape_markdown_v2(line)
 
 
 async def bot_admin(page: int = 1, *, command_message_id: int | None = None) -> BotAdmin:
@@ -160,4 +161,4 @@ async def bot_admin(page: int = 1, *, command_message_id: int | None = None) -> 
         ],
     ]
 
-    return BotAdmin(text=text, keyboard=keyboard)
+    return BotAdmin(text=text, keyboard=keyboard, parse_mode=PARSE_MODE_MARKDOWN_V2)

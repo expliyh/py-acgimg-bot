@@ -12,10 +12,15 @@ from services import group_guard
 
 @dataclass(slots=True)
 class ConfigGroup:
-    """Container for the rendered group configuration panel."""
+    """Container for the rendered group configuration panel.
+
+    ``text`` is plain. Group names are not escaped, and ``parse_mode`` stays
+    empty so characters such as ``_`` or ``*`` are shown literally.
+    """
 
     text: str
     keyboard: list[list[InlineKeyboardButton]]
+    parse_mode: str | None = None
 
 
 def _bool_icon(value: bool) -> str:
