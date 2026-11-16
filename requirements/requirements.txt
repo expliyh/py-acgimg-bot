@@ -3,7 +3,7 @@ uvicorn==0.54.0
 python-telegram-bot[all]==22.8
 sqlalchemy[asyncio]==2.1.8
 asyncmy==0.2.17
-mariadb==1.1.14
+mariadb==1.1.15
 python-dotenv>=1.2.4,<2.0.0
 aiosqlite==0.22.1
 singleton-class-decorator>=1.0.1,<2.0.0
