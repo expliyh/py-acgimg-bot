@@ -55,6 +55,7 @@ jobs:
             .coverage.e2e
           python -m coverage report --show-missing
           python -m coverage json -o coverage.json
+          python tests/check_statement_coverage.py coverage.json
 
       # A separate workflow_run workflow consumes this as untrusted data. Keeping
       # the write token out of this workflow lets coverage work safely for forks.
