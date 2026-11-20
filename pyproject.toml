@@ -45,6 +45,25 @@ dev = [
 ]
 
 [tool.coverage.run]
-omit = ["tests/*"]
+# Measure the whole checkout, then keep only first-party business modules.
+# tests/ is the suite itself. .venv and site-packages are third-party.
+# webui/ is the Vue frontend and has no business Python.
+source = ["."]
+omit = [
+    "tests/*",
+    "tests/**",
+    ".venv/*",
+    "*/.venv/*",
+    "*/site-packages/*",
+    "webui/*",
+    "webui/**",
+]
 patch = ["subprocess"]
 sigterm = true
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+# Do not use fail_under here. With --cov-branch, coverage.py fails on the
+# combined line+branch percentage. Statement coverage is gated by
+# tests/check_statement_coverage.py, which requires strictly more than 80%.

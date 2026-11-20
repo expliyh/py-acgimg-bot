@@ -147,7 +147,7 @@ jobs:
               '| --- | ---: | ---: |',
               ...coverageByType.map(coverageRow),
               '',
-              '> Coverage is currently informational only; no minimum threshold is enforced.',
+              '> Tests 工作流会在一方业务语句覆盖率未严格高于 80% 时失败。这里的分支数据仍然只作展示。',
               '',
               `[🔍 View workflow run](${run.html_url})`,
             ].join('\n');
